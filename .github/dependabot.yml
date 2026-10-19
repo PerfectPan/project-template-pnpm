@@ -1,0 +1,44 @@
+version: 2
+
+updates:
+  # Dependabot does not understand Rush: it edits package.json but not common/config/rush/pnpm-lock.yaml, and
+  # ensureConsistentVersions needs a dependency moved in every package at once. One group collects every minor and
+  # patch npm update into one weekly PR, and majors go into a second one so a failing major does not hold back the
+  # rest; push `rush update` output to each branch before merging (see docs/development/release.md). The cooldown
+  # must not be shorter than minimumReleaseAgeMinutes in common/config/rush/pnpm-config.json.
+  # A vite-plus bump must also bump the @voidzero-dev/vite-plus-core override in common/config/rush/pnpm-config.json.
+  - package-ecosystem: "npm"
+    directories:
+      - "/packages/*"
+      - "/scripts"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm:
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
+      npm-major:
+        patterns:
+          - "*"
+        update-types: ["major"]
+    ignore:
+      # lint-config is a git dependency whose upgrades land with their code fixes; Dependabot misreads its tags
+      # and proposes downgrades (v0.5.0 -> v0.3.2).
+      - dependency-name: "@perfectpan/lint-config"
+      # Runtime types follow the Node LTS major pinned in .node-version.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"

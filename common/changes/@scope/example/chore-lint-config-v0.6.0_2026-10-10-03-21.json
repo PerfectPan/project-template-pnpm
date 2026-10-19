@@ -1,0 +1,11 @@
+{
+  "changes": [
+    {
+      "packageName": "@scope/example",
+      "comment": "Adopt lint-config v0.6.0.",
+      "type": "none"
+    }
+  ],
+  "packageName": "@scope/example",
+  "email": "24316656+PerfectPan@users.noreply.github.com"
+}

@@ -1,0 +1,11 @@
+{
+  "changes": [
+    {
+      "packageName": "@scope/example",
+      "comment": "Move the toolchain to Vite+ (vp): vp pack builds the package, vp lint, vp fmt and vp test replace oxlint, oxfmt and vitest.",
+      "type": "none"
+    }
+  ],
+  "packageName": "@scope/example",
+  "email": "24316656+PerfectPan@users.noreply.github.com"
+}
