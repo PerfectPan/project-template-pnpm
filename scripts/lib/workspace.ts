@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative } from "node:path";
 
 export const CHANGES_DIRECTORY = ".changeset";
@@ -12,11 +13,8 @@ export interface PackageManifest {
   repository?: string | { url?: string };
 }
 
-/** One entry of `pnpm ls -r --depth -1 --json`: pnpm decides workspace membership, not this script. */
+/** One entry of `pnpm ls -r --depth -1 --json`: pnpm decides workspace membership, not the scripts. */
 export interface WorkspaceEntry {
-  name?: string;
-  version?: string;
-  private?: boolean;
   /** Workspace-relative directory with forward slashes; "." for the workspace root. */
   dir: string;
 }
@@ -38,15 +36,15 @@ export function splitScriptArgs(argv: readonly string[]): string[] {
   return [...argv.slice(0, separator), ...argv.slice(separator + 1)];
 }
 
+/** The absolute repository root, resolved so that it matches the paths `pnpm ls` reports. */
+export function findRepositoryRoot(): string {
+  return realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+}
+
 /** Parses `pnpm ls -r --depth -1 --json` output into workspace entries with workspace-relative directories. */
 export function parseWorkspaceEntries(root: string, json: string): WorkspaceEntry[] {
-  const parsed = JSON.parse(json) as { name?: string; version?: string; private?: boolean; path: string }[];
-  return parsed.map(({ name, version, private: isPrivate, path }) => ({
-    name,
-    version,
-    private: isPrivate,
-    dir: relative(root, path).split("\\").join("/") || "."
-  }));
+  const parsed = JSON.parse(json) as { path: string }[];
+  return parsed.map(({ path }) => ({ dir: relative(root, path).split("\\").join("/") || "." }));
 }
 
 /** Reads each workspace member's package.json; pnpm's entry carries the membership, the manifest the release fields. */
@@ -55,6 +53,16 @@ export function readManifests(root: string, entries: readonly WorkspaceEntry[]):
     dir: entry.dir,
     manifest: JSON.parse(readFileSync(join(root, entry.dir, "package.json"), "utf8")) as PackageManifest
   }));
+}
+
+/** Lists the workspace members through pnpm and reads their manifests. */
+export function readWorkspacePackages(root: string): WorkspacePackage[] {
+  const lsOutput = execFileSync("pnpm", ["ls", "-r", "--depth", "-1", "--json"], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024
+  });
+  return readManifests(root, parseWorkspaceEntries(root, lsOutput));
 }
 
 /** A package publishes when it is not private; pnpm's own commands skip private packages on publish. */
@@ -118,14 +126,22 @@ export function releaseErrors({ tag, repository, packages, pendingChangesets }: 
     errors.push("release tag is required");
   }
 
+  // A mismatch between one consistent version and the tag means the tag is wrong; versions that disagree with
+  // each other mean a published package is missing from the fixed group.
+  const sharedVersions = new Set(published.map(({ manifest }) => manifest.version));
+  const versionsAgree = sharedVersions.size <= 1;
+
   for (const { dir, manifest } of published) {
     const name = manifest.name ?? dir;
     if (manifest.version === undefined || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
       errors.push(`${name} version must be a stable x.y.z release, got "${manifest.version ?? "(missing)"}"`);
     } else if (tag !== undefined && tag.length > 0 && tag !== `v${manifest.version}`) {
       errors.push(
-        `release tag ${tag} does not match ${name}@${manifest.version} (all published packages release at one ` +
-          "shared version; add every published package to the versioning.fixed group in pnpm-workspace.yaml)"
+        versionsAgree
+          ? `release tag ${tag} does not match ${name}@${manifest.version}; check the release tag against the ` +
+              "shared version of the published packages"
+          : `release tag ${tag} does not match ${name}@${manifest.version} (all published packages release at one ` +
+              "shared version; add every published package to the versioning.fixed group in pnpm-workspace.yaml)"
       );
     }
     if (manifest.publishConfig?.access !== "public") {

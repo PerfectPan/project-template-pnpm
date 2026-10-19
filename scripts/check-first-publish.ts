@@ -1,37 +1,36 @@
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
 import process from "node:process";
 
-import { isPublishable, parseWorkspaceEntries, readManifests } from "./lib/workspace.ts";
+import { findRepositoryRoot, isPublishable, readWorkspacePackages } from "./lib/workspace.ts";
 
-const root = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
-const lsOutput = execFileSync("pnpm", ["ls", "-r", "--depth", "-1", "--json"], {
-  cwd: root,
-  encoding: "utf8",
-  maxBuffer: 16 * 1024 * 1024
-});
-
+const root = findRepositoryRoot();
 const registry = process.env.RELEASE_REGISTRY ?? "https://registry.npmjs.org/";
-const names = readManifests(root, parseWorkspaceEntries(root, lsOutput))
+const names = readWorkspacePackages(root)
   .filter(isPublishable)
   .map((pkg) => pkg.manifest.name)
   .filter((name): name is string => name !== undefined && name.length > 0);
 
 const missing: string[] = [];
 for (const name of names) {
+  let versions: unknown;
   try {
-    // npm exits non-zero with a 404 for a package name that does not exist; an existing but empty
-    // versions list counts as unpublished too.
-    const versions = JSON.parse(
+    versions = JSON.parse(
       execFileSync("npm", ["view", name, "versions", "--json", "--registry", registry], {
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"]
+        stdio: ["ignore", "pipe", "pipe"]
       })
     );
-    if (!Array.isArray(versions) || versions.length === 0) {
-      missing.push(name);
+  } catch (error) {
+    const stderr = String((error as { stderr?: Buffer | string }).stderr ?? "");
+    if (!stderr.includes("E404")) {
+      // A network or registry failure is not evidence that the package is unpublished; say so and stop.
+      console.error(`check-first-publish: registry lookup failed for ${name}: ${stderr.trim().split("\n")[0]}`);
+      process.exit(1);
     }
-  } catch {
+    missing.push(name);
+    continue;
+  }
+  if (!Array.isArray(versions) || versions.length === 0) {
     missing.push(name);
   }
 }

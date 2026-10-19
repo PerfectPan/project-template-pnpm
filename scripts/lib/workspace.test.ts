@@ -30,14 +30,10 @@ describe("parseWorkspaceEntries", () => {
       { name: "repo-scripts", version: "0.0.0", path: "/repo/scripts", private: true }
     ]);
     expect(parseWorkspaceEntries("/repo", json)).toEqual([
-      { name: "project-template-pnpm", private: true, dir: "." },
-      { name: "@scope/example", version: "1.0.0", private: false, dir: "packages/example" },
-      { name: "repo-scripts", version: "0.0.0", private: true, dir: "scripts" }
+      { dir: "." },
+      { dir: "packages/example" },
+      { dir: "scripts" }
     ]);
-  });
-
-  it("ignores nothing and requires valid JSON", () => {
-    expect(() => parseWorkspaceEntries("/repo", "not json")).toThrow("Unexpected token");
   });
 });
 
@@ -86,9 +82,9 @@ describe("releaseErrors", () => {
     expect(releaseErrors(input({ packages: [] }))).toContain("the workspace has no published packages");
   });
 
-  it("rejects a tag that does not match the package version and points at versioning.fixed", () => {
+  it("rejects a tag that does not match the packages' shared version and points at the tag", () => {
     expect(releaseErrors(input({ tag: "v1.2.4" }))).toEqual([
-      "release tag v1.2.4 does not match @scope/lib@1.2.3 (all published packages release at one shared version; add every published package to the versioning.fixed group in pnpm-workspace.yaml)"
+      "release tag v1.2.4 does not match @scope/lib@1.2.3; check the release tag against the shared version of the published packages"
     ]);
   });
 

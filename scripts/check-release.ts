@@ -1,13 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
 import process from "node:process";
 import { parseArgs } from "node:util";
 
 import {
   type ReleaseInput,
+  findRepositoryRoot,
   isPublishable,
-  parseWorkspaceEntries,
-  readManifests,
+  readWorkspacePackages,
   releaseErrors,
   splitScriptArgs,
   pendingChangesets
@@ -29,22 +28,16 @@ if (values.help === true) {
   process.exit(0);
 }
 
-const root = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+const root = findRepositoryRoot();
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 
 const tag = positionals[0] ?? process.env.RELEASE_TAG;
 const repository = values.repository ?? process.env.GITHUB_REPOSITORY ?? "";
 
-// pnpm decides workspace membership; directories under packages/ without a package.json are not members.
-const lsOutput = execFileSync("pnpm", ["ls", "-r", "--depth", "-1", "--json"], {
-  cwd: root,
-  encoding: "utf8",
-  maxBuffer: 16 * 1024 * 1024
-});
 const input: ReleaseInput = {
   tag,
   repository,
-  packages: readManifests(root, parseWorkspaceEntries(root, lsOutput)),
+  packages: readWorkspacePackages(root),
   pendingChangesets: pendingChangesets(root)
 };
 
