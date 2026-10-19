@@ -1,23 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Rush accepts comments in its JSON files; these scripts use JSON.parse, so keep rush.json and
-// version-policies.json free of comments.
-export const LOCKFILE = "common/config/rush/pnpm-lock.yaml";
-export const CHANGES_DIRECTORY = "common/changes";
-
-export interface RushProject {
-  packageName: string;
-  projectFolder: string;
-  versionPolicyName?: string;
-  shouldPublish?: boolean;
-}
-
-export interface VersionPolicy {
-  policyName: string;
-  definitionName: "lockStepVersion" | "individualVersion";
-  version?: string;
-}
+export const WORKSPACE_FILE = "pnpm-workspace.yaml";
+export const CHANGES_DIRECTORY = ".changeset";
 
 export interface PackageManifest {
   name?: string;
@@ -28,41 +13,106 @@ export interface PackageManifest {
   repository?: string | { url?: string };
 }
 
-export function readJson<T>(root: string, path: string): T {
-  return JSON.parse(readFileSync(join(root, path), "utf8")) as T;
-}
-
-export function readProjects(root: string): RushProject[] {
-  return readJson<{ projects: RushProject[] }>(root, "rush.json").projects;
-}
-
-export function readPolicies(root: string): VersionPolicy[] {
-  return readJson<VersionPolicy[]>(root, "common/config/rush/version-policies.json");
-}
-
-/** Rush publishes a project that has a version policy or sets `shouldPublish`. */
-export function isPublished(project: RushProject): boolean {
-  return project.shouldPublish === true || project.versionPolicyName !== undefined;
+export interface WorkspacePackage {
+  /** Workspace-relative directory, with forward slashes. */
+  dir: string;
+  manifest: PackageManifest;
 }
 
 /**
- * A changed file needs a release note when it can change what a published package ships: its source,
- * manifest and build config, or the lockfile that pins its dependencies. Tests, fixtures and Markdown do not.
- * `rush change --verify` only looks inside project folders, so the lockfile rule is what this adds.
+ * The `packages:` list of a pnpm-workspace.yaml. Only the forms this repository uses are understood: literal
+ * workspace-relative directories and single-segment globs such as `packages/*`. pnpm itself accepts the full
+ * glob language; check-release.ts fails loudly on a glob it cannot resolve so a new pattern is noticed instead
+ * of silently skipped.
  */
-export function isShippedChange(path: string, projects: RushProject[]): boolean {
-  if (path === LOCKFILE) {
-    return true;
+export function parseWorkspaceGlobs(yaml: string): string[] {
+  const lines = yaml.split("\n");
+  const start = lines.findIndex((line) => /^packages:\s*(#.*)?$/.test(line));
+  if (start === -1) {
+    throw new Error(`${WORKSPACE_FILE} has no packages list`);
   }
-  const project = projects.find((candidate) => path.startsWith(`${candidate.projectFolder}/`));
-  if (project === undefined || !isPublished(project)) {
-    return false;
+  const entries: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*(#.*)?$/.test(line)) {
+      continue;
+    }
+    const item = /^(\s*)-\s+(.*?)\s*(?:#.*)?$/.exec(line);
+    if (item === null) {
+      break;
+    }
+    const value = item[2]!.replace(/^['"]|['"]$/g, "");
+    if (value.length > 0) {
+      entries.push(value);
+    }
   }
-  return !/\.test\.[cm]?[jt]sx?$/.test(path) && !/(^|\/)(fixtures|__tests__)\//.test(path) && !path.endsWith(".md");
+  if (entries.length === 0) {
+    throw new Error(`${WORKSPACE_FILE} packages list is empty`);
+  }
+  return entries;
 }
 
-export function isChangeFile(path: string): boolean {
-  return path.startsWith(`${CHANGES_DIRECTORY}/`) && path.endsWith(".json");
+/** Expands the supported globs against the repository root; duplicate directories are listed once. */
+export function resolveWorkspaceDirs(root: string, globs: readonly string[]): string[] {
+  const dirs = new Set<string>();
+  for (const glob of globs) {
+    if (!glob.includes("*")) {
+      dirs.add(glob);
+      continue;
+    }
+    const segments = glob.split("/");
+    const last = segments[segments.length - 1]!;
+    const unsupported =
+      glob.includes("**") || last === "" || segments.slice(0, -1).some((segment) => segment.includes("*"));
+    if (unsupported) {
+      throw new Error(
+        `${WORKSPACE_FILE} glob "${glob}" is not supported by scripts/check-release.ts; use literal directories ` +
+          "or a single-segment glob such as packages/*"
+      );
+    }
+    const parent = segments.slice(0, -1).join("/") || ".";
+    const pattern = new RegExp(
+      `^${last
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*")}$`
+    );
+    for (const entry of readdirSync(join(root, parent), { withFileTypes: true })) {
+      if (entry.isDirectory() && pattern.test(entry.name)) {
+        dirs.add(parent === "." ? entry.name : glob.slice(0, glob.length - last.length) + entry.name);
+      }
+    }
+  }
+  return [...dirs].sort();
+}
+
+/** Reads every workspace package the globs resolve to, in directory order. */
+export function readWorkspacePackages(root: string, globs: readonly string[]): WorkspacePackage[] {
+  return resolveWorkspaceDirs(root, globs).map((dir) => ({
+    dir,
+    manifest: JSON.parse(readFileSync(join(root, dir, "package.json"), "utf8")) as PackageManifest
+  }));
+}
+
+/** A package publishes when it is not private; pnpm's own commands skip private packages on publish. */
+export function isPublishable(pkg: WorkspacePackage): boolean {
+  return pkg.manifest.private !== true;
+}
+
+/**
+ * Pending changesets are the `.changeset/*.md` intent files `pnpm version -r` consumes; README and pnpm's own
+ * state files stay. Leftover files mean the version PR has not run since the last change.
+ */
+export function pendingChangesets(root: string): string[] {
+  try {
+    return readdirSync(join(root, CHANGES_DIRECTORY), { encoding: "utf8" })
+      .filter((name) => name.endsWith(".md") && !name.startsWith("README"))
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export function repositoryUrl(manifest: PackageManifest): string | undefined {
@@ -81,43 +131,35 @@ export function identifiesRepository(url: string | undefined, repository: string
 export interface ReleaseInput {
   tag: string | undefined;
   repository: string;
-  policy: VersionPolicy;
-  packages: { project: RushProject; manifest: PackageManifest }[];
-  pendingChangeFiles: string[];
+  packages: WorkspacePackage[];
+  pendingChangesets: string[];
 }
 
-/** Returns every reason the release cannot be published; an empty list means the release set is valid. */
-export function releaseErrors({ tag, repository, policy, packages, pendingChangeFiles }: ReleaseInput): string[] {
+/**
+ * Returns every reason the release cannot be published; an empty list means the release set is valid. Every
+ * published package must carry the version the tag names: one release tag covers the whole release set, so a
+ * set of packages that version independently needs a `versioning.fixed` group to release together.
+ */
+export function releaseErrors({ tag, repository, packages, pendingChangesets }: ReleaseInput): string[] {
   const errors: string[] = [];
   if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
     errors.push(`repository must be owner/name, got "${repository}"`);
   }
-  if (packages.length === 0) {
-    errors.push(`version policy ${policy.policyName} has no projects`);
+  const published = packages.filter(isPublishable);
+  if (published.length === 0) {
+    errors.push("the workspace has no published packages");
   }
 
-  if (policy.definitionName === "lockStepVersion") {
-    const version = policy.version ?? "";
-    if (!/^\d+\.\d+\.\d+$/.test(version)) {
-      errors.push(`policy ${policy.policyName} version must be a stable x.y.z release, got "${version}"`);
-    }
-    if (tag !== `v${version}`) {
-      errors.push(`release tag ${tag ?? "(missing)"} does not match policy version v${version}`);
-    }
-  } else if (tag === undefined || tag.length === 0) {
+  if (tag === undefined || tag.length === 0) {
     errors.push("release tag is required");
   }
 
-  for (const { project, manifest } of packages) {
-    const name = project.packageName;
-    if (manifest.name !== name) {
-      errors.push(`${project.projectFolder}/package.json name must be ${name}`);
-    }
-    if (manifest.private === true) {
-      errors.push(`${name} is private but belongs to a version policy`);
-    }
-    if (policy.definitionName === "lockStepVersion" && manifest.version !== policy.version) {
-      errors.push(`${name} version ${manifest.version ?? "(missing)"} does not match policy version ${policy.version}`);
+  for (const { dir, manifest } of published) {
+    const name = manifest.name ?? dir;
+    if (manifest.version === undefined || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
+      errors.push(`${name} version must be a stable x.y.z release, got "${manifest.version ?? "(missing)"}"`);
+    } else if (tag !== `v${manifest.version}`) {
+      errors.push(`release tag ${tag ?? "(missing)"} does not match ${name}@${manifest.version}`);
     }
     if (manifest.publishConfig?.access !== "public") {
       errors.push(`${name} publishConfig.access must be "public"`);
@@ -131,8 +173,8 @@ export function releaseErrors({ tag, repository, policy, packages, pendingChange
     }
   }
 
-  if (pendingChangeFiles.length > 0) {
-    errors.push(`unreleased change files remain; run Version Packages first: ${pendingChangeFiles.join(", ")}`);
+  if (pendingChangesets.length > 0) {
+    errors.push(`unreleased changesets remain; run Version Packages first: ${pendingChangesets.join(", ")}`);
   }
   return errors;
 }

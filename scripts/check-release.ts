@@ -1,25 +1,28 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import { parseArgs } from "node:util";
 
 import {
-  CHANGES_DIRECTORY,
-  type PackageManifest,
-  readJson,
-  readPolicies,
-  readProjects,
-  releaseErrors
+  WORKSPACE_FILE,
+  type ReleaseInput,
+  readWorkspacePackages,
+  releaseErrors,
+  pendingChangesets,
+  parseWorkspaceGlobs
 } from "./lib/workspace.ts";
 
-const USAGE = "usage: node scripts/check-release.ts <tag> [--repository owner/name] [--policy <name>] [--verify-git]";
+const USAGE = "usage: node scripts/check-release.ts <tag> [--repository owner/name] [--verify-git]";
 
+// `pnpm run release:check -- <args>` forwards the separator verbatim; parseArgs would treat it as the
+// end-of-options marker and turn the flags behind it into positionals.
+const args = process.argv.slice(2);
+const separator = args.indexOf("--");
 const { positionals, values } = parseArgs({
+  args: separator === -1 ? args : [...args.slice(0, separator), ...args.slice(separator + 1)],
   allowPositionals: true,
   options: {
     repository: { type: "string" },
-    policy: { type: "string" },
     "verify-git": { type: "boolean" },
     help: { type: "boolean", short: "h" }
   }
@@ -34,36 +37,15 @@ const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encodi
 
 const tag = positionals[0] ?? process.env.RELEASE_TAG;
 const repository = values.repository ?? process.env.GITHUB_REPOSITORY ?? "";
-const policies = readPolicies(root);
-const policy = values.policy
-  ? policies.find((candidate) => candidate.policyName === values.policy)
-  : policies.length === 1
-    ? policies[0]
-    : undefined;
-if (policy === undefined) {
-  console.error(`check-release: --policy must name one of ${policies.map((p) => p.policyName).join(", ")}\n${USAGE}`);
-  process.exit(1);
-}
 
-const packages = readProjects(root)
-  .filter((project) => project.versionPolicyName === policy.policyName)
-  .map((project) => ({
-    project,
-    manifest: readJson<PackageManifest>(root, join(project.projectFolder, "package.json"))
-  }));
+const input: ReleaseInput = {
+  tag,
+  repository,
+  packages: readWorkspacePackages(root, parseWorkspaceGlobs(readFileSync(`${root}/${WORKSPACE_FILE}`, "utf8"))),
+  pendingChangesets: pendingChangesets(root)
+};
 
-let pendingChangeFiles: string[] = [];
-try {
-  pendingChangeFiles = readdirSync(join(root, CHANGES_DIRECTORY), { recursive: true, encoding: "utf8" })
-    .filter((path) => path.endsWith(".json"))
-    .sort();
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-    throw error;
-  }
-}
-
-const errors = releaseErrors({ tag, repository, policy, packages, pendingChangeFiles });
+const errors = releaseErrors(input);
 
 if (values["verify-git"] === true) {
   const head = git("rev-parse", "HEAD");
@@ -91,5 +73,8 @@ if (errors.length > 0) {
   }
   process.exit(1);
 }
-const names = packages.map(({ project }) => project.packageName).join(", ");
-console.log(`check-release: ok (${policy.policyName} ${tag}: ${names})`);
+const names = input.packages
+  .filter((pkg) => pkg.manifest.private !== true)
+  .map((pkg) => pkg.manifest.name)
+  .join(", ");
+console.log(`check-release: ok (${tag}: ${names})`);
