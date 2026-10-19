@@ -39,8 +39,8 @@ jobs:
       - uses: changesets/action@v2
         with:
           version-script: pnpm run version-packages
-          commit-message: chore(release): version packages
-          pr-title: chore(release): version packages
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
           pr-draft: always
           # The token goes through the input, not the GITHUB_TOKEN environment variable: the action fails when the
           # env var and the input disagree, which would break a later switch to an App token or PAT.
