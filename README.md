@@ -12,7 +12,7 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
 | Concern | Choice |
 | --- | --- |
 | Monorepo | pnpm 12.8.1 workspace, pinned in the root `package.json` `packageManager` field; members in `pnpm-workspace.yaml` |
-| Runtime | The current Node.js LTS major in `.node-version` (`24`); CI resolves its latest patch. `engines` requires `^24.11.0` |
+| Runtime | The current Node.js LTS major in `.node-version` (`24`); CI resolves its latest patch. `engines` and `devEngines.runtime` require `^24.11.0`, and pnpm fails the install outside that range (`ERR_PNPM_BAD_RUNTIME_VERSION`) |
 | Language | TypeScript 7.0.2, `tsconfig` extends `@perfectpan/lint-config/tsconfig/node.json` |
 | Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.6.0; type check stays `tsc` |
 | Tests | Vitest 5 bundled in Vite+; test files import from `vite-plus/test` |
