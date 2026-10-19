@@ -1,38 +1,47 @@
 # npm Release Runbook
 
-Rush owns change records, version bumps, changelogs and publishing. Packages under `packages/` that join the `main`
-version policy are published to npm by GitHub Actions with npm Trusted Publishing (OIDC) and provenance. No
+pnpm owns change records (`pnpm change`), version bumps (`pnpm version -r`) and changelogs. Published packages
+under `packages/` are published to npm by GitHub Actions with npm Trusted Publishing (OIDC) and provenance. No
 long-lived npm token is stored in the repository or its secrets.
 
 | Step | Where | Result |
 | --- | --- | --- |
-| Change file | feature PR | `common/changes/<package>/*.json`, verified by CI |
-| Version Packages | `version-packages.yml` (manual) | draft PR `chore(release): version packages` on `rush-release/main`; the PR body lists each package's changelog section |
-| Release PR merge | GitHub | bumped `package.json` versions, `CHANGELOG.md`/`CHANGELOG.json`, updated lockfile on `main` |
+| Changeset | feature PR | `.changeset/<name>.md`, written with `pnpm change` or by hand |
+| Version Packages | `version-packages.yml` (manual) | draft PR `chore(release): version packages` on `changeset-release/main`; the PR body lists each release |
+| Release PR merge | GitHub | bumped `package.json` versions, `CHANGELOG.md` per package, `.changeset/ledger.yaml`, no pending changesets |
 | GitHub Release | GitHub UI or `gh release create` | tag `vX.Y.Z` on the release commit |
 | Publish | `publish-npm.yml` (on Release `published`) | packages on npm with provenance |
 
 Each row is a separate completion state. A merged release PR is not a published release, and a started publish
 workflow is not a published package.
 
-## Version Policy
+## Versioning Configuration
 
-`common/config/rush/version-policies.json` defines one `lockStepVersion` policy named `main`, starting at `0.0.0`
-with `nextBump: "patch"`. Every package in the policy shares one version and is released together. A lockstep bump
-comes from `nextBump`, not from the bump types in change files; pick `minor` or `major` in the Version Packages
-workflow input when a release needs it. The first release of a new repository usually uses `minor` (`0.1.0`).
+`pnpm-workspace.yaml` sets `versioning.changelog.storage: repository`, so `pnpm version -r` deletes consumed
+changesets immediately and commits each package's `CHANGELOG.md`. The default (`registry`) keeps changesets until
+the registry confirms publication; the changesets action would then keep reopening a version PR forever, because
+it decides from the remaining `.changeset/*.md` files.
 
-To version packages independently, switch the policy to `individualVersion`:
+Every published package versions on its own: the bump comes from the largest bump among the changesets naming it.
+The release flow assumes one version per release tag — `scripts/check-release.ts` requires every published
+package to carry the tag's version. When the repository publishes more than one package that must release
+together, add a `versioning.fixed` group in `pnpm-workspace.yaml`; its members always bump and publish at one
+shared version. Packages that should never version belong in `versioning.ignore`.
 
-```json
-[{ "policyName": "main", "definitionName": "individualVersion" }]
-```
+`pnpm change status` previews the pending release plan, and `pnpm change check` validates committed versions
+against `versioning.fixed` groups without reading intents.
 
-Rush then bumps each package from the bump types in its own change files. Update the workflows to match: `scripts/check-release.ts` skips the tag-equals-version rule for `individualVersion`, and `scripts/release-notes.ts`, which renders the release PR body from the policy's packages, exits 1 without exactly one
-`lockStepVersion` policy. Choose a tag scheme (for example `release-2026-10-01`) and document it here. To rename
-the policy, update
-`version-policies.json`, every `versionPolicyName` in `rush.json`, and the `--version-policy main` arguments in
-`package.json` and `.github/workflows/`.
+## First Releases
+
+`pnpm version -r` checks the registry before applying a plan (pnpm 11.16+). For a package whose manifest version
+was never published, the package **debuts at the manifest version verbatim** and pending changesets apply from
+the next release only. Measured on this template: `@scope/example` at `0.0.0` with a `minor` changeset produces
+`0.0.0 → 0.0.0`; the changeset is still consumed and the `0.0.0` section lands in `CHANGELOG.md`. Once the
+registry knows `0.0.0`, the same changeset produces `0.0.0 → 0.1.0`.
+
+This is why the setup below publishes a placeholder `0.0.0` once: the first real Version Packages run then bumps
+to `0.1.0` (the template keeps a `minor` "Initial release." changeset in `.changeset/` for exactly that), and the
+placeholder never collides with it.
 
 ## One-Time Setup
 
@@ -42,7 +51,7 @@ the policy, update
    private repository it publishes without provenance.
 2. Every published `package.json` has `repository.url` pointing at this GitHub repository (`git+https://github.com/OWNER/REPO.git`)
    and `publishConfig.access: "public"`. npm rejects provenance when the repository does not match, and
-   `npm run release:check` enforces both.
+   `pnpm run release:check` enforces both.
 3. Let GitHub Actions create pull requests: **Settings → Actions → General → Workflow permissions → Allow GitHub
    Actions to create and approve pull requests**. Version Packages fails without it.
 
@@ -52,8 +61,7 @@ A trusted publisher is configured per package name, and npm only offers the sett
 exists. For each package:
 
 1. **First publish only.** OIDC cannot create a new package name, so a maintainer publishes a placeholder `0.0.0`
-   once, with their own npm login. The policy starts at `0.0.0` and the first real release is higher, so the
-   placeholder never collides with it:
+   once, with their own npm login:
 
    ```bash
    dir="$(mktemp -d)" && cd "$dir"
@@ -74,56 +82,56 @@ authentication error for that package only.
 
 ## Cutting a Release
 
-1. Merge feature PRs with change files (`npm run change`). CI runs `rush change --verify` and
-   `scripts/release-intent.ts check` on every PR except the release PR and Dependabot PRs.
-2. Run **Actions → Version Packages → Run workflow** on `main`. Choose `policy` for the policy's `nextBump`, or
-   `patch`/`minor`/`major`. The workflow runs `rush version --bump`, which consumes the change files, bumps the
-   policy and package versions and writes changelogs, then `rush update`, and opens or updates the signed draft PR
-   `chore(release): version packages` from `rush-release/main`. The PR body is the output of
-   `scripts/release-notes.ts`: the fixed intro followed by each policy package's `## <name>@<version>` section from
-   its `CHANGELOG.md`. The script cuts the body at a package boundary and points at the CHANGELOG files before
-   create-pull-request would truncate it mid-section at GitHub's 65,536-character limit.
+1. Merge feature PRs that carry changesets (`.changeset/*.md`). Changesets are not CI-enforced; whether a change
+   rides a release is the maintainer's call. The release bump is the largest bump across the pending changesets —
+   to release a major, merge a `major` changeset first.
+2. Run **Actions → Version Packages → Run workflow** on `main`. The changesets action runs `pnpm run
+   version-packages` (`pnpm version -r`), which consumes the pending changesets, bumps package versions, writes
+   each package's `CHANGELOG.md` and records consumption in `.changeset/ledger.yaml`. The action commits through
+   the GitHub API (signed) and opens or updates the draft PR `chore(release): version packages` from
+   `changeset-release/main`. The PR body lists every released package with its new changelog section.
 3. Start CI on the release PR. Pull requests created with the workflow's `GITHUB_TOKEN` do not trigger workflows.
    Select **Ready for review** (the `ready_for_review` event starts CI), or close and reopen the PR. Pushing an
-   empty commit to the branch also works. To avoid the manual step, give `create-pull-request` a GitHub App token
-   or a fine-grained PAT instead of `GITHUB_TOKEN`.
+   empty commit to the branch also works. To avoid the manual step, give the action a GitHub App token or a
+   fine-grained PAT instead of `GITHUB_TOKEN`.
 4. Review the version and changelog diff, wait for green checks, and squash-merge.
 5. Check the release identity locally on the merged release commit:
 
    ```bash
    git switch main && git pull
-   npm run release:check -- vX.Y.Z --repository OWNER/REPO
+   pnpm run release:check -- vX.Y.Z --repository OWNER/REPO
    ```
 
+   The check requires the tag version on every published package, `publishConfig.access: "public"`, a `files`
+   list, a matching `repository.url`, and no pending changesets.
 6. Create a non-prerelease GitHub Release with tag `vX.Y.Z` targeting the release commit (not a later `main`):
 
    ```bash
    gh release create vX.Y.Z --target <release-commit-sha> --generate-notes
    ```
 
-   `publish-npm.yml` checks out the tag, verifies the tag equals `v<policy version>`, every package version matches,
-   no change files remain and the commit is on `main`, runs `npm run check`, then runs
-   `rush publish --include-all --version-policy main --publish --set-access-level public`. Rush skips versions that
-   already exist on npm. Prereleases do not publish.
+   `publish-npm.yml` checks out the tag, verifies the tag equals the package versions and the commit is on
+   `main` (`release:check --verify-git`), runs `pnpm run check`, then runs
+   `pnpm publish -r --access public --no-git-checks`. pnpm publishes natively, sends the workflow's OIDC token and
+   attaches provenance itself, and skips packages whose version already exists on npm. Prereleases do not publish.
 7. Verify every package at the new version, for example `npm view @scope/example@X.Y.Z` and a clean
    `npm install` in a scratch project. Registry reads can lag the publish by a minute; retry the read, not the
    publish. The npm package page shows a provenance badge linking to the workflow run.
 
-`npm run publish:dry-run` runs the same `rush publish` command without `--publish`: it lists what would be published
-and changes nothing.
+`pnpm run publish:dry-run` runs the same `pnpm publish -r` command with `--dry-run`: it does everything a publish
+would do except uploading, so it lists what a release would ship. Run it after `pnpm run check` so `dist` exists.
 
 ## Bot Pull Requests
 
 - **Release PR**: see step 3 above. Its title already passes `gh repo-checks pr-title`; bot PRs skip the description check.
-- **Dependabot npm PRs**: one weekly PR carries every minor and patch npm update, and a second one every major. They
-  edit `package.json` files but not the Rush lockfile, so `rush install` fails in CI. Check out the branch, run
-  `node common/scripts/install-run-rush.js update`, commit the lockfile, and push. Add a change file for each
-  published package whose runtime dependencies or peers changed:
-  `node scripts/release-intent.ts add --type patch --message "Update dependencies."` (add `--package <name>` when the
-  repository publishes more than one package). Dependabot moves a peer together with the matching devDependency;
-  moving an exact peer is a `minor` change, since hosts pinning the old version then fail to install, so do not run
-  Version Packages with `patch` for a release that carries one. Bump any package the PR left behind in the same branch
-  if `ensureConsistentVersions` fails.
+- **Dependabot npm PRs**: one weekly PR carries every minor and patch npm update, and a second one every major.
+  Dependabot reads the single root `pnpm-lock.yaml` and updates the catalog in `pnpm-workspace.yaml` directly, so
+  CI runs green without manual lockfile steps. A `vite-plus` bump and the matching `vite` alias
+  (`npm:@voidzero-dev/vite-plus-core`) land in separate PRs; add the alias bump to the first branch before
+  merging so the two stay in lockstep. Dependabot moves a peer together with the matching devDependency; moving an
+  exact peer is a `minor` change, since hosts pinning the old version then fail to install, so do not run Version
+  Packages with only `patch` changesets for a release that carries one. Add a `patch` changeset for published
+  packages whose runtime dependencies or peers changed.
 - **Dependabot GitHub Actions PRs** move an action to its next major version tag (for example `actions/checkout@v7`
   to `@v8`); minor and patch releases need no PR because workflows reference the major tag. Merge them for this
   repository's own workflows (`ci.yml`, `version-packages.yml`, `publish-npm.yml`). Close PRs that touch `review.yml` or another file
@@ -133,11 +141,11 @@ and changes nothing.
 
 ## Failure Recovery
 
-- **Validation fails before publishing** (`release:check`, `npm run check`): nothing was published. Fix the cause
+- **Validation fails before publishing** (`release:check`, `pnpm run check`): nothing was published. Fix the cause
   in a new PR, then delete the GitHub Release and its tag and create them again on the fixed commit, or cut the
   next version. This is the only case where a tag may be recreated.
 - **Authentication fails for a package**: configure its trusted publisher, then re-run the failed workflow run.
-  Rush skips packages already published at that version, so a re-run only publishes what is missing.
+  pnpm skips packages already published at that version, so a re-run only publishes what is missing.
 - **Partial publish**: multi-package publishing is not atomic. Re-run the workflow; never hand-publish a different
   artifact under the same version.
 - **Bad published contents**: npm versions are immutable. Deprecate the version and release a fix:

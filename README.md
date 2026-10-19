@@ -1,42 +1,43 @@
-# Project Template: Rush
+# Project Template: pnpm
 
-A repository template for TypeScript monorepos managed with [Rush](https://rushjs.io) and pnpm that publish
+A repository template for TypeScript monorepos managed with a [pnpm](https://pnpm.io) workspace that publish
 packages to npm.
 
-It layers a Rush workspace, shared lint and format rules, CI, and an npm release flow on top of the stack-agnostic
-[PerfectPan/project-template](https://github.com/PerfectPan/project-template), and keeps that template's
-contribution workflow (Spec + Plan), review checks, Git hooks and documentation standards.
+It layers a pnpm workspace, shared lint and format rules, CI, and an npm release flow on top of the
+stack-agnostic [PerfectPan/project-template](https://github.com/PerfectPan/project-template), and keeps that
+template's contribution workflow (Spec + Plan), review checks, Git hooks and documentation standards.
 
 ## Stack
 
 | Concern | Choice |
 | --- | --- |
-| Monorepo | Rush 5.180.0, pnpm 12.8.1 (workspaces), pinned in `rush.json` |
+| Monorepo | pnpm 12.8.1 workspace, pinned in the root `package.json` `packageManager` field; members in `pnpm-workspace.yaml` |
 | Runtime | The current Node.js LTS major in `.node-version` (`24`); CI resolves its latest patch. `engines` requires `^24.11.0` |
 | Language | TypeScript 7.0.2, `tsconfig` extends `@perfectpan/lint-config/tsconfig/node.json` |
 | Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.6.0; type check stays `tsc` |
 | Tests | Vitest 5 bundled in Vite+; test files import from `vite-plus/test` |
-| Releases | Rush change files, lockstep version policy `main`, npm Trusted Publishing with provenance |
+| Shared versions | External dependencies used by workspace packages live in the `pnpm-workspace.yaml` catalog; `catalogMode: strict` rejects a package that pins its own version |
+| Releases | pnpm release management (`pnpm change`, `pnpm version -r`), the changesets GitHub action for the version PR, npm Trusted Publishing with provenance |
 
 ## Quick Start
 
 1. **Create the repository** from this template (GitHub **Use this template**, or
-   `gh repo create OWNER/REPO --public --template PerfectPan/project-template-rush --clone`).
+   `gh repo create OWNER/REPO --public --template PerfectPan/project-template-pnpm --clone`).
 2. **Rename the placeholders.**
-   - Package scope and name: `@scope/example` in `rush.json`, `packages/example/package.json`, its README, and the
-     directory `common/changes/@scope/example/`. Rename or replace `packages/example` itself as needed.
-   - Repository URL: `PerfectPan/project-template-rush` in `rush.json` and every published `package.json`
-     `repository.url`. npm provenance requires it to match the publishing repository.
+   - Package scope and name: `@scope/example` in `packages/example/package.json` (name, `repository.url` and the
+     directory), its README, and the `.changeset/initial-release.md` entry. Rename or replace `packages/example`
+     itself as needed.
+   - Repository URL: `PerfectPan/project-template-pnpm` in every published `package.json` `repository.url`. npm
+     provenance requires it to match the publishing repository.
    - Root `package.json` `name` and this README. Pick the license by project type: libraries and tools keep
      the MIT `LICENSE` (update the holder); applications switch to GPL-3.0-only (see `CONTRIBUTING.md` License).
-   - Optionally the version policy name `main` (see [the release runbook](docs/development/release.md#version-policy)).
 3. **Install and check.**
 
    ```bash
    gh extension install PerfectPan/gh-repo-checks
    ./scripts/install-git-hooks.sh
-   node common/scripts/install-run-rush.js update   # refreshes the lockfile after renaming
-   npm run check
+   pnpm install
+   pnpm run check
    ```
 
 4. **Protect the default branch** with an admin-authorized `gh` session:
@@ -56,40 +57,42 @@ contribution workflow (Spec + Plan), review checks, Git hooks and documentation 
 ## Layout
 
 ```text
-rush.json                     Rush projects and the Rush, pnpm and Node versions
-common/config/rush/           bulk commands, version policy, pnpm settings, lockfile
-common/changes/               pending Rush change files, consumed by Version Packages
-common/scripts/               install-run-rush.js and friends (managed by Rush; do not edit)
+pnpm-workspace.yaml           workspace members, the shared dependency catalog, pnpm and release settings
+pnpm-lock.yaml                the one lockfile for the whole workspace
+.changeset/                   pending changesets, consumed by Version Packages
 packages/example/             example public library: src, vp pack build to dist, vite-plus/test suite
-scripts/                      repo-scripts project (release-intent.ts, check-release.ts) and the template's shell checks
+scripts/                      repo-scripts project (check-release.ts) and the template's shell checks
 .github/workflows/            ci.yml, review.yml, version-packages.yml, publish-npm.yml
 docs/development/release.md   release runbook
 ```
 
-The root `package.json` is not a Rush project. Its scripts call `common/scripts/install-run-rush.js`, so
-`npm run check` works without a global Rush or pnpm.
+The root `package.json` is not a workspace member and has no dependencies. Its scripts call `pnpm -r`, so
+`pnpm run check` works from the repository root.
 
 ## Commands
 
 | Command | What it runs |
 | --- | --- |
-| `npm run check` | `format:check`, `build`, `lint`, `typecheck`, `test` (repository checks run in the Review workflow and the pre-commit hook) |
-| `npm run build` / `lint` / `typecheck` / `test` / `format` / `format:check` | the Rush bulk command of the same name in every project |
-| `npm run change` | `rush change`: record a release note for changed packages |
-| `npm run change:verify` | `rush change --verify` plus `scripts/release-intent.ts check` against `origin/main` |
-| `npm run version-packages` | `rush version --bump --version-policy main`, then `rush update` |
-| `npm run release:check -- vX.Y.Z --repository OWNER/REPO` | tag, version, manifest and pending-change checks before publishing |
-| `npm run publish:dry-run` | `rush publish` without `--publish`: lists what would be published |
+| `pnpm run check` | `format:check`, `build`, `lint`, `typecheck`, `test` (repository checks run in the Review workflow and the pre-commit hook) |
+| `pnpm run build` / `lint` / `typecheck` / `test` / `format` / `format:check` | `pnpm -r run <task>`: the task in every workspace package that defines it |
+| `pnpm --filter @scope/example run test` | one package's task; add `...` after the name to include its workspace dependencies |
+| `pnpm change` | record a changeset for changed packages |
+| `pnpm run version-packages` | `pnpm version -r`: consume changesets, bump versions, write changelogs |
+| `pnpm run release:check -- vX.Y.Z --repository OWNER/REPO` | tag, version, manifest and pending-changeset checks before publishing |
+| `pnpm run publish:dry-run` | `pnpm publish -r --dry-run`: lists what a publish would upload |
 
 ## CI and Releases
 
-- `ci.yml` runs `npm run check` on pull requests and `main`, and on pull requests also requires Rush change files
-  for package changes. It caches Rush's pnpm store and npm cache, keyed by the lockfile. Private repositories pay for
-  Actions minutes: there, consider running CI only on `ready_for_review` plus `workflow_dispatch` instead of every push.
+- `ci.yml` runs `pnpm run check` on pull requests and `main`. `pnpm/setup` installs pnpm and Node from the pinned
+  versions, installs with `--frozen-lockfile`, and caches the pnpm store keyed on the lockfile. Private
+  repositories pay for Actions minutes: there, consider running CI only on `ready_for_review` plus
+  `workflow_dispatch` instead of every push.
 - `review.yml` (from the upstream template) checks repository hygiene, the PR title and the PR description.
-- `version-packages.yml` (manual) opens the draft PR `chore(release): version packages`.
+- `version-packages.yml` (manual) consumes pending changesets and opens the draft PR
+  `chore(release): version packages` from `changeset-release/main`.
 - `publish-npm.yml` publishes when a non-prerelease GitHub Release is published.
-- Dependabot updates npm dependencies and GitHub Actions weekly with `chore(deps)` titles.
+- Dependabot updates npm dependencies (the catalog in `pnpm-workspace.yaml` and the root lockfile) and GitHub
+  Actions weekly with `chore(deps)` titles.
 
 Workflows reference actions by their latest major version tag, such as `actions/checkout@v7`, not by commit SHA. See
 [docs/development/release.md](docs/development/release.md) for the release procedure and recovery steps.
@@ -103,9 +106,10 @@ MIT. See [LICENSE](LICENSE). Projects created from this template choose their ow
 Generic files come from [PerfectPan/project-template](https://github.com/PerfectPan/project-template): the policy
 sections of `AGENTS.md` and `CONTRIBUTING.md`, `SECURITY.md`, `docs/README.md`, `docs/specs/`,
 `docs/plans/`, the PR/MR and issue templates, `.githooks/pre-commit`, `.github/workflows/review.yml`, and the shell
-scripts under `scripts/`. Sync those from upstream instead of editing them here, then keep the Rush-specific additions:
+scripts under `scripts/`. Sync those from upstream instead of editing them here, then keep the pnpm-specific
+additions:
 
 - the filled command sections in `AGENTS.md`, `CONTRIBUTING.md` and the PR/MR templates;
-- `.githooks/pre-push`, the Rush entries in `.gitignore`, and everything Rush, npm or TypeScript specific.
+- `.githooks/pre-push`, and everything pnpm, npm or TypeScript specific.
 
 Keep this template free of project-specific business logic; `packages/example` stays a minimal example.

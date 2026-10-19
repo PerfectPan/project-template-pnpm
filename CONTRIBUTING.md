@@ -2,33 +2,36 @@
 
 ## Development Setup
 
-Requirements: the Node.js major in `.node-version` (Node 24, the current LTS) and Git. Rush and pnpm are downloaded on demand
-at the versions pinned in `rush.json`; a global install is optional.
+Requirements: the Node.js major in `.node-version` (Node 24, the current LTS) and Git. pnpm is pinned in the root
+`package.json` `packageManager` field; corepack resolves it automatically (`corepack enable pnpm` once per
+machine), and CI installs it through `pnpm/setup`. A standalone pnpm install also works if its major matches.
 
-CI and `.node-version` follow the current Node.js Active LTS major, and workflows reference actions by their latest major tag. When a new Node.js line enters Active LTS (Node 26 is expected in late October 2026), move `.node-version`, `nodeSupportedVersionRange` in `rush.json`, the `engines` fields and `@types/node` to it in one change.
+CI and `.node-version` follow the current Node.js Active LTS major, and workflows reference actions by their latest major tag. When a new Node.js line enters Active LTS (Node 26 is expected in late October 2026), move `.node-version`, the `engines` fields and the `@types/node` catalog entry to it in one change.
 
 ```bash
 # install local Git hooks
 ./scripts/install-git-hooks.sh
 
-# install dependencies from the committed lockfile
-node common/scripts/install-run-rush.js install
+# install dependencies from the committed lockfile (CI does the same with --frozen-lockfile)
+pnpm install
 
 # after changing dependencies in any package.json, refresh the lockfile and commit it
-# (pnpm rejects versions published less than a day ago: minimumReleaseAgeMinutes in common/config/rush/pnpm-config.json)
-node common/scripts/install-run-rush.js update
+# (pnpm rejects versions published less than a day ago: minimumReleaseAge in pnpm-workspace.yaml)
+pnpm install
 
 # run the full local gate
-npm run check
+pnpm run check
 
-# work on one package; rushx runs that package's scripts (needs a global `npm i -g @microsoft/rush`)
-cd packages/example && rushx test
+# work on one package (add ... after the name to include its workspace dependencies)
+pnpm --filter @scope/example run test
 ```
 
-To add a package, copy `packages/example`, rename it, register it in `rush.json` with `"versionPolicyName": "main"`
-(or `"shouldPublish": false` for a private package), and run `node common/scripts/install-run-rush.js update`.
-Each package owns its toolchain devDependencies; `ensureConsistentVersions` in `rush.json` keeps their versions
-identical across packages.
+To add a package, copy `packages/example`, rename it, and run `pnpm install` so the lockfile picks it up.
+Dependencies shared with other workspace packages come from the `pnpm-workspace.yaml` catalog
+(`"dependency": "catalog:"`); `catalogMode: strict` fails the install when a package pins a version the catalog
+does not declare, which keeps shared versions identical across packages. A published package needs a stable
+`version`, a `repository.url` pointing at this GitHub repository, `publishConfig.access: "public"` and a
+`files` list; a private tool package sets `"private": true`.
 
 ## Contribution Flow
 
@@ -54,10 +57,7 @@ Small typo corrections, narrow documentation fixes, and repository metadata upda
 ./scripts/install-git-hooks.sh
 
 # Aggregate gate: format:check, build, lint, typecheck, test, repository checks:
-npm run check
-
-# Change files for package changes (compares with origin/main; CI runs it on every PR):
-npm run change:verify
+pnpm run check
 
 # PR/MR title:
 gh repo-checks pr-title "docs: update project template"
@@ -69,30 +69,33 @@ gh repo-checks pr-body pr-body.md
 gh repo-checks protect --repo OWNER/REPO
 
 # Package or release dry-run:
-npm run publish:dry-run
+pnpm run publish:dry-run
 ```
 
-## Change Files
+## Changesets
 
-Rush builds changelogs and version bumps from change files in `common/changes/`. A PR that changes what a
-published package ships (source, manifest, build config) or the Rush lockfile needs at least one:
+pnpm builds changelogs and version bumps from changesets in `.changeset/`. A PR that changes what a published
+package ships (source, manifest, build config) or the lockfile should include one:
 
 ```bash
-npm run change
+pnpm change
 ```
 
-Rush asks for a bump type and a user-facing message per changed package. Use `none` for changes that need a record
-but no release. `rush change --verify` only sees files inside project folders, so `scripts/release-intent.ts`
-additionally requires a change file when `common/config/rush/pnpm-lock.yaml` changes. When `rush change` reports
-nothing to do, write one directly:
+`pnpm change` asks for the affected packages, a bump type (`patch`, `minor`, `major`) and a user-facing message.
+It needs an interactive terminal; agents write the file directly instead:
 
-```bash
-node scripts/release-intent.ts add --type patch --message "Update runtime dependencies."
+```markdown
+---
+"@scope/example": patch
+---
+
+Update runtime dependencies.
 ```
 
-Tests, fixtures and Markdown inside a package do not count as shipped files for `release-intent`, but
-`rush change --verify` still asks for a record; answer with `none`. Release and dependency bot PRs skip both checks
-in CI. See [`docs/development/release.md`](docs/development/release.md) for the release procedure.
+The file name is a short kebab-case slug. `pnpm change status` previews what pending changesets would release, and
+`pnpm version -r` (the `version-packages` script) consumes them. Tests, fixtures and Markdown changes usually do
+not need a changeset; changesets are not CI-enforced in this template, so whether a change rides a release is the
+maintainer's call. See [`docs/development/release.md`](docs/development/release.md) for the release procedure.
 
 ## SDD Workflow And Document Lifecycle
 
@@ -176,7 +179,7 @@ Update the description when review feedback, rebases, or follow-up commits chang
 
 ## Release Notes
 
-Release notes come from the release tool. Rush writes each published package's `CHANGELOG.md` from the change files in `common/changes/` (see [Change Files](#change-files)). Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
+Release notes come from the release tool. `pnpm version -r` writes each published package's `CHANGELOG.md` from the changesets in `.changeset/` (see [Changesets](#changesets)) and records consumption in `.changeset/ledger.yaml`. Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
 
 ## License
 

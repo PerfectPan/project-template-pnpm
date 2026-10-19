@@ -10,7 +10,7 @@ export default defineConfig({
     entry: { index: "./src/index.ts" },
     format: "esm",
     // The Node platform resolves node: built-ins and their bare spellings; "neutral" would emit
-    // UNRESOLVED_IMPORT warnings for them, which Rush reports as build warnings and fails the check.
+    // UNRESOLVED_IMPORT warnings for them, which `pnpm run check` reports and fails on.
     platform: "node",
     // Extensionless output keeps dist/index.js and dist/index.d.ts, matching the exports map.
     fixedExtension: false,

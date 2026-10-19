@@ -13,37 +13,40 @@ This repository is intended to become a maintainable, publishable project. Treat
 
 ## Project-Specific Commands
 
-This is a Rush + pnpm TypeScript monorepo. Rush pins its own version and pnpm in `rush.json`; the root
-`package.json` only holds shortcuts that call `common/scripts/install-run-rush.js`, so `npm run <script>` works
-without a global Rush or pnpm install. Node comes from `.node-version`.
+This is a pnpm workspace TypeScript monorepo. The pnpm version is pinned in the root `package.json`
+`packageManager` field (corepack and CI resolve it automatically); the root `package.json` is not a workspace
+member and only holds `pnpm -r` shortcuts. Node comes from `.node-version`.
 
 ```bash
 # Install local Git hooks (pre-commit repository checks, pre-push blocks direct pushes to main):
 ./scripts/install-git-hooks.sh
 
-# Install dependencies from the committed lockfile (CI does the same):
-node common/scripts/install-run-rush.js install
+# Install dependencies from the committed lockfile (CI does the same with --frozen-lockfile):
+pnpm install
 
-# After adding or changing a dependency in any package.json:
-node common/scripts/install-run-rush.js update
+# After adding or changing a dependency, refresh the lockfile and commit it:
+pnpm install
 
 # Aggregate gate: format:check, build, lint, typecheck, test:
-npm run check
+pnpm run check
 
-# Individual gates (Rush bulk commands run in every project):
-npm run format        # or format:check
-npm run build
-npm run lint          # vp lint: oxlint with type-aware rules and TypeScript diagnostics
-npm run typecheck
-npm run test
+# Individual gates (run in every workspace package that defines them):
+pnpm run format        # or format:check
+pnpm run build
+pnpm run lint          # vp lint: oxlint with type-aware rules and TypeScript diagnostics
+pnpm run typecheck
+pnpm run test
 
-# Record a release note for changed packages, then verify one exists (CI runs the verify step on PRs):
-npm run change
-npm run change:verify
+# Work on one package (add ... after the name to include its workspace dependencies):
+pnpm --filter @scope/example run test
 
-# Release identity check and publish dry run (never add --publish locally):
-npm run release:check -- vX.Y.Z --repository OWNER/REPO
-npm run publish:dry-run
+# Record a release note for changed packages (interactive; needs a terminal — agents write
+# .changeset/<kebab-name>.md directly, see CONTRIBUTING.md):
+pnpm change
+
+# Release identity check and publish dry run (dry run never uploads):
+pnpm run release:check -- vX.Y.Z --repository OWNER/REPO
+pnpm run publish:dry-run
 
 # Repository, PR/MR title and description checks:
 gh repo-checks repository
@@ -54,10 +57,12 @@ gh repo-checks pr-body pr-body.md
 gh repo-checks protect --repo OWNER/REPO
 ```
 
-Rush projects are listed in `rush.json`. Publishable packages live under `packages/` and join the `main` version
-policy; `scripts/` is the private `repo-scripts` project for repository automation written in TypeScript and run
-directly by Node. Every project defines the `build`, `lint`, `typecheck`, `test`, `format` and `format:check`
-scripts that the Rush bulk commands call. `docs/development/release.md` is the release runbook.
+Workspace members are listed in `pnpm-workspace.yaml`. Publishable packages live under `packages/`;
+`scripts/` is the private `repo-scripts` package for repository automation written in TypeScript and run directly
+by Node. Shared dependency versions live in the `pnpm-workspace.yaml` catalog, referenced as `catalog:` and
+enforced by `catalogMode: strict`; `versioning` configures the release flow. Every package defines the `build`,
+`lint`, `typecheck`, `test`, `format` and `format:check` scripts that the root shortcuts call.
+`docs/development/release.md` is the release runbook.
 
 Do not claim implementation work is complete until the relevant commands pass, or until skipped commands are explained with concrete blockers.
 
@@ -76,11 +81,11 @@ For non-trivial changes:
 
 ## Releases
 
-- A PR that changes a published package's source, manifest or build config, or the Rush lockfile, includes a Rush
-  change file under `common/changes/`. Create it with `npm run change`; when Rush reports nothing to do (for
-  example a lockfile-only change), use `node scripts/release-intent.ts add --type <major|minor|patch|none> --message "<text>"`.
-- Never bump versions, edit `CHANGELOG.json`/`CHANGELOG.md`, create release tags, or run `rush publish --publish`
-  by hand. The `Version Packages` workflow prepares versions, and publishing a GitHub Release runs `publish-npm.yml`.
+- A PR that changes what a published package ships (source, manifest, build config) or the lockfile includes a
+  changeset under `.changeset/`. Create it with `pnpm change`, or write the file directly (format in
+  `CONTRIBUTING.md`). Changesets are not CI-enforced in this template; adding one is the maintainer's call.
+- Never bump versions, edit generated `CHANGELOG.md` files, create release tags, or publish by hand. The
+  `Version Packages` workflow prepares versions, and publishing a GitHub Release runs `publish-npm.yml`.
   Follow `docs/development/release.md`.
 - Workspace dependencies between packages use `workspace:*`; pnpm replaces them with exact versions when packing.
 
@@ -99,7 +104,7 @@ For non-trivial changes:
 - Use `CONTRIBUTING.md` for contribution workflow.
 - Use `docs/specs/` for active product behavior and `docs/plans/` for active technical decisions and detailed execution plans. Current-state documentation owns implemented behavior.
 - Use `docs/` for durable current-state knowledge such as architecture, development guides, operational runbooks, references, and onboarding tutorials.
-- Record user-facing changes with Rush change files (`npm run change`) in the same PR; do not edit generated changelogs or add a hand-written root `CHANGELOG.md`.
+- Record user-facing changes with changesets (`.changeset/*.md`) in the same PR; do not edit generated changelogs or add a hand-written root `CHANGELOG.md`.
 - When behavior, configuration, commands, APIs, deployment, architecture, or operations change, update the relevant docs in the same PR/MR or explain why no docs changed.
 
 ## AI Delivery Workflow
@@ -138,7 +143,6 @@ rg --hidden --no-ignore -n "private-token|secret|internal-domain.example|HOME_PA
   --glob '!.git/**' \
   --glob '!.omx/**' \
   --glob '!**/node_modules/**' \
-  --glob '!common/temp/**' \
   --glob '!**/dist/**' \
   --glob '!AGENTS.md' \
   --glob '!CONTRIBUTING.md' \
