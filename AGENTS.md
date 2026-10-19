@@ -14,8 +14,8 @@ This repository is intended to become a maintainable, publishable project. Treat
 ## Project-Specific Commands
 
 This is a pnpm workspace TypeScript monorepo. The pnpm version is pinned in the root `package.json`
-`packageManager` field (corepack and CI resolve it automatically); the root `package.json` is not a workspace
-member and only holds `pnpm -r` shortcuts. Node comes from `.node-version`.
+`packageManager` field (corepack and CI resolve it automatically). The root `package.json` is itself a private
+workspace project — it publishes nothing and holds the `pnpm -r` shortcuts. Node comes from `.node-version`.
 
 ```bash
 # Install local Git hooks (pre-commit repository checks, pre-push blocks direct pushes to main):
@@ -40,8 +40,9 @@ pnpm run test
 # Work on one package (add ... after the name to include its workspace dependencies):
 pnpm --filter @scope/example run test
 
-# Record a release note for changed packages (interactive; needs a terminal — agents write
-# .changeset/<kebab-name>.md directly, see CONTRIBUTING.md):
+# Record a release note for changed packages. Non-interactive form (works without a terminal):
+pnpm change @scope/example --bump patch --summary "Update runtime dependencies."
+# Interactive prompt (needs a terminal); preview with `pnpm change status`:
 pnpm change
 
 # Release identity check and publish dry run (dry run never uploads):
@@ -59,8 +60,10 @@ gh repo-checks protect --repo OWNER/REPO
 
 Workspace members are listed in `pnpm-workspace.yaml`. Publishable packages live under `packages/`;
 `scripts/` is the private `repo-scripts` package for repository automation written in TypeScript and run directly
-by Node. Shared dependency versions live in the `pnpm-workspace.yaml` catalog, referenced as `catalog:` and
-enforced by `catalogMode: strict`; `versioning` configures the release flow. Every package defines the `build`,
+by Node. Shared dependency versions live in the `pnpm-workspace.yaml` catalog, referenced as `catalog:`;
+`catalogMode: strict` makes `pnpm add` of an already-cataloged package at an off-catalog version fail, but it does
+not police hand-edited manifests, so keep shared versions in the catalog deliberately. All published packages
+release at one shared version through the `versioning.fixed` group. Every package defines the `build`,
 `lint`, `typecheck`, `test`, `format` and `format:check` scripts that the root shortcuts call.
 `docs/development/release.md` is the release runbook.
 

@@ -1,7 +1,7 @@
 {
   "name": "project-template-pnpm",
   "private": true,
-  "description": "Command shortcuts for this pnpm workspace. It is not a workspace package and has no dependencies.",
+  "description": "Private workspace root: pnpm counts it as a workspace project; it publishes nothing and holds the pnpm -r shortcuts for the repository.",
   "packageManager": "pnpm@12.8.1",
   "scripts": {
     "build": "pnpm -r run build",
@@ -14,7 +14,7 @@
     "check": "pnpm run format:check && pnpm run build && pnpm run lint && pnpm run typecheck && pnpm run test",
     "version-packages": "pnpm version -r",
     "release:check": "node scripts/check-release.ts",
-    "publish:dry-run": "pnpm publish -r --access public --no-git-checks --dry-run"
+    "publish:dry-run": "pnpm publish -r --access public --no-git-checks --dry-run --json"
   },
   "engines": {
     "node": "^24.11.0"

@@ -28,10 +28,11 @@ pnpm --filter @scope/example run test
 
 To add a package, copy `packages/example`, rename it, and run `pnpm install` so the lockfile picks it up.
 Dependencies shared with other workspace packages come from the `pnpm-workspace.yaml` catalog
-(`"dependency": "catalog:"`); `catalogMode: strict` fails the install when a package pins a version the catalog
-does not declare, which keeps shared versions identical across packages. A published package needs a stable
-`version`, a `repository.url` pointing at this GitHub repository, `publishConfig.access: "public"` and a
-`files` list; a private tool package sets `"private": true`.
+(`"dependency": "catalog:"`); `catalogMode: strict` makes `pnpm add` of an already-cataloged package at an
+off-catalog version fail, but it does not police hand-edited manifests, so keep shared versions in the catalog
+deliberately. A published package needs a stable `version`, a `repository.url` pointing at this GitHub repository,
+`publishConfig.access: "public"`, a `files` list, and a place in the `versioning.fixed` group in
+`pnpm-workspace.yaml`; a private tool package sets `"private": true`.
 
 ## Contribution Flow
 
@@ -82,7 +83,13 @@ pnpm change
 ```
 
 `pnpm change` asks for the affected packages, a bump type (`patch`, `minor`, `major`) and a user-facing message.
-It needs an interactive terminal; agents write the file directly instead:
+Without a terminal, pass them explicitly:
+
+```bash
+pnpm change @scope/example --bump patch --summary "Update runtime dependencies."
+```
+
+Or write the file directly (this is what the command produces):
 
 ```markdown
 ---

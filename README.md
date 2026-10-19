@@ -16,8 +16,8 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
 | Language | TypeScript 7.0.2, `tsconfig` extends `@perfectpan/lint-config/tsconfig/node.json` |
 | Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.6.0; type check stays `tsc` |
 | Tests | Vitest 5 bundled in Vite+; test files import from `vite-plus/test` |
-| Shared versions | External dependencies used by workspace packages live in the `pnpm-workspace.yaml` catalog; `catalogMode: strict` rejects a package that pins its own version |
-| Releases | pnpm release management (`pnpm change`, `pnpm version -r`), the changesets GitHub action for the version PR, npm Trusted Publishing with provenance |
+| Shared versions | External dependencies used by workspace packages live in the `pnpm-workspace.yaml` catalog; `catalogMode: strict` rejects `pnpm add` of a cataloged package at an off-catalog version |
+| Releases | pnpm release management (`pnpm change`, `pnpm version -r`) with all published packages in one `versioning.fixed` lockstep group, the changesets GitHub action for the version PR, npm Trusted Publishing with provenance |
 
 ## Quick Start
 
@@ -66,8 +66,8 @@ scripts/                      repo-scripts project (check-release.ts) and the te
 docs/development/release.md   release runbook
 ```
 
-The root `package.json` is not a workspace member and has no dependencies. Its scripts call `pnpm -r`, so
-`pnpm run check` works from the repository root.
+The root `package.json` is itself a private workspace project — pnpm counts it among the workspace projects, it
+publishes nothing, and its scripts call `pnpm -r`, so `pnpm run check` works from the repository root.
 
 ## Commands
 
@@ -79,7 +79,7 @@ The root `package.json` is not a workspace member and has no dependencies. Its s
 | `pnpm change` | record a changeset for changed packages |
 | `pnpm run version-packages` | `pnpm version -r`: consume changesets, bump versions, write changelogs |
 | `pnpm run release:check -- vX.Y.Z --repository OWNER/REPO` | tag, version, manifest and pending-changeset checks before publishing |
-| `pnpm run publish:dry-run` | `pnpm publish -r --dry-run`: lists what a publish would upload |
+| `pnpm run publish:dry-run` | `pnpm publish -r --dry-run --json`: prints, per package a publish would upload, the version and the file list. Run it after `pnpm run check` so `dist` exists |
 
 ## CI and Releases
 
@@ -91,8 +91,10 @@ The root `package.json` is not a workspace member and has no dependencies. Its s
 - `version-packages.yml` (manual) consumes pending changesets and opens the draft PR
   `chore(release): version packages` from `changeset-release/main`.
 - `publish-npm.yml` publishes when a non-prerelease GitHub Release is published.
-- Dependabot updates npm dependencies (the catalog in `pnpm-workspace.yaml` and the root lockfile) and GitHub
-  Actions weekly with `chore(deps)` titles.
+- Dependabot updates npm dependencies and GitHub Actions weekly with `chore(deps)` titles. Dependabot officially
+  supports pnpm 7–10; on pnpm 12 its support is limited (dependabot-core#16397), so a PR may edit `package.json`
+  or the catalog without regenerating `pnpm-lock.yaml` — run `pnpm install` and commit the lockfile on the branch
+  before merging. See [docs/development/release.md](docs/development/release.md).
 
 Workflows reference actions by their latest major version tag, such as `actions/checkout@v7`, not by commit SHA. See
 [docs/development/release.md](docs/development/release.md) for the release procedure and recovery steps.

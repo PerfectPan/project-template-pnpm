@@ -22,26 +22,25 @@ changesets immediately and commits each package's `CHANGELOG.md`. The default (`
 the registry confirms publication; the changesets action would then keep reopening a version PR forever, because
 it decides from the remaining `.changeset/*.md` files.
 
-Every published package versions on its own: the bump comes from the largest bump among the changesets naming it.
-The release flow assumes one version per release tag — `scripts/check-release.ts` requires every published
-package to carry the tag's version. When the repository publishes more than one package that must release
-together, add a `versioning.fixed` group in `pnpm-workspace.yaml`; its members always bump and publish at one
-shared version. Packages that should never version belong in `versioning.ignore`.
+All published packages release in lockstep through the `versioning.fixed` group: `pnpm version -r` bumps the whole
+group together at one shared version, and one release tag covers it — `scripts/check-release.ts` requires every
+published package to carry the tag's version and says so when a package lags behind. Add every new published
+package to the group. A package that should never version belongs in `versioning.ignore`.
 
 `pnpm change status` previews the pending release plan, and `pnpm change check` validates committed versions
 against `versioning.fixed` groups without reading intents.
 
 ## First Releases
 
-`pnpm version -r` checks the registry before applying a plan (pnpm 11.16+). For a package whose manifest version
-was never published, the package **debuts at the manifest version verbatim** and pending changesets apply from
-the next release only. Measured on this template: `@scope/example` at `0.0.0` with a `minor` changeset produces
-`0.0.0 → 0.0.0`; the changeset is still consumed and the `0.0.0` section lands in `CHANGELOG.md`. Once the
-registry knows `0.0.0`, the same changeset produces `0.0.0 → 0.1.0`.
+Publishing a package name that has never existed on npm fails at the trusted-publishing exchange (OIDC cannot
+create package names), while `pnpm version -r` consumes the changesets either way. The Version Packages workflow
+therefore runs `scripts/check-first-publish.ts` first and fails while any published package has no version on npm.
 
-This is why the setup below publishes a placeholder `0.0.0` once: the first real Version Packages run then bumps
-to `0.1.0` (the template keeps a `minor` "Initial release." changeset in `.changeset/` for exactly that), and the
-placeholder never collides with it.
+This is why the setup below publishes a placeholder `0.0.0` once. Afterwards the first Version Packages run bumps
+`0.0.0 → 0.1.0` from the kept `minor` "Initial release." changeset in `.changeset/`. Measured on pnpm 12.8.1: with
+the `versioning.fixed` group, the pending intent applies to the group's shared version even before that version
+was ever published; without a fixed group, pnpm's rule (11.16+) is that a never-published package debuts at its
+manifest version verbatim and pending changesets apply from the next release only.
 
 ## One-Time Setup
 
@@ -71,7 +70,8 @@ exists. For each package:
    ```
 
    Scoped packages need an npm organization or user scope that the maintainer owns. Skip this step if the name
-   already exists on npm.
+   already exists on npm. Until the placeholder exists, the Version Packages workflow fails its first-publish check
+   (`scripts/check-first-publish.ts`) instead of consuming changesets for a package that cannot publish.
 2. On npmjs.com open the package **Settings → Trusted Publisher → GitHub Actions** and enter the owner, the
    repository, the workflow filename `publish-npm.yml`, and no environment (unless you add one to the workflow).
 3. Under **Publishing access**, select "Require two-factor authentication and disallow tokens" so that only the
@@ -85,15 +85,18 @@ authentication error for that package only.
 1. Merge feature PRs that carry changesets (`.changeset/*.md`). Changesets are not CI-enforced; whether a change
    rides a release is the maintainer's call. The release bump is the largest bump across the pending changesets —
    to release a major, merge a `major` changeset first.
-2. Run **Actions → Version Packages → Run workflow** on `main`. The changesets action runs `pnpm run
-   version-packages` (`pnpm version -r`), which consumes the pending changesets, bumps package versions, writes
+2. Run **Actions → Version Packages → Run workflow** on `main`. The workflow first requires every published
+   package to have a version on npm — a missing first publish fails the run (see One-Time Setup). The changesets
+   action runs `pnpm run version-packages` (`pnpm version -r`), which consumes the pending changesets, bumps
+   package versions, writes
    each package's `CHANGELOG.md` and records consumption in `.changeset/ledger.yaml`. The action commits through
    the GitHub API (signed) and opens or updates the draft PR `chore(release): version packages` from
    `changeset-release/main`. The PR body lists every released package with its new changelog section.
-3. Start CI on the release PR. Pull requests created with the workflow's `GITHUB_TOKEN` do not trigger workflows.
-   Select **Ready for review** (the `ready_for_review` event starts CI), or close and reopen the PR. Pushing an
-   empty commit to the branch also works. To avoid the manual step, give the action a GitHub App token or a
-   fine-grained PAT instead of `GITHUB_TOKEN`.
+3. Start CI on the release PR. Pull requests created with `github.token` do not trigger workflows. Select **Ready
+   for review** (the `ready_for_review` event starts CI), or close and reopen the PR. Pushing an empty commit to
+   the branch also works. To avoid the manual step, pass an App token or a fine-grained PAT to the changesets
+   action's `github-token` input in `.github/workflows/version-packages.yml` — never through the `GITHUB_TOKEN`
+   environment variable, which the action rejects when it differs from the input.
 4. Review the version and changelog diff, wait for green checks, and squash-merge.
 5. Check the release identity locally on the merged release commit:
 
@@ -118,15 +121,18 @@ authentication error for that package only.
    `npm install` in a scratch project. Registry reads can lag the publish by a minute; retry the read, not the
    publish. The npm package page shows a provenance badge linking to the workflow run.
 
-`pnpm run publish:dry-run` runs the same `pnpm publish -r` command with `--dry-run`: it does everything a publish
-would do except uploading, so it lists what a release would ship. Run it after `pnpm run check` so `dist` exists.
+`pnpm run publish:dry-run` runs the same `pnpm publish -r` command with `--dry-run --json`: it does everything a
+publish would do except uploading, and prints, per package a publish would upload, the version and the file list.
+Run it after `pnpm run check` so `dist` exists.
 
 ## Bot Pull Requests
 
 - **Release PR**: see step 3 above. Its title already passes `gh repo-checks pr-title`; bot PRs skip the description check.
 - **Dependabot npm PRs**: one weekly PR carries every minor and patch npm update, and a second one every major.
-  Dependabot reads the single root `pnpm-lock.yaml` and updates the catalog in `pnpm-workspace.yaml` directly, so
-  CI runs green without manual lockfile steps. A `vite-plus` bump and the matching `vite` alias
+  Dependabot officially supports pnpm 7–10; on pnpm 12 its support is limited (dependabot-core#16397), so a PR may
+  edit `package.json` files or the catalog in `pnpm-workspace.yaml` without regenerating the root
+  `pnpm-lock.yaml`. Check out the branch, run `pnpm install`, and commit the lockfile so CI runs green. A
+  `vite-plus` bump and the matching `vite` alias
   (`npm:@voidzero-dev/vite-plus-core`) land in separate PRs; add the alias bump to the first branch before
   merging so the two stay in lockstep. Dependabot moves a peer together with the matching devDependency; moving an
   exact peer is a `minor` change, since hosts pinning the old version then fail to install, so do not run Version
