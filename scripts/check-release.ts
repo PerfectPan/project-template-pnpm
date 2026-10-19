@@ -1,25 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import process from "node:process";
 import { parseArgs } from "node:util";
 
 import {
-  WORKSPACE_FILE,
   type ReleaseInput,
-  readWorkspacePackages,
+  isPublishable,
+  parseWorkspaceEntries,
+  readManifests,
   releaseErrors,
-  pendingChangesets,
-  parseWorkspaceGlobs
+  splitScriptArgs,
+  pendingChangesets
 } from "./lib/workspace.ts";
 
 const USAGE = "usage: node scripts/check-release.ts <tag> [--repository owner/name] [--verify-git]";
 
-// `pnpm run release:check -- <args>` forwards the separator verbatim; parseArgs would treat it as the
-// end-of-options marker and turn the flags behind it into positionals.
-const args = process.argv.slice(2);
-const separator = args.indexOf("--");
 const { positionals, values } = parseArgs({
-  args: separator === -1 ? args : [...args.slice(0, separator), ...args.slice(separator + 1)],
+  args: splitScriptArgs(process.argv.slice(2)),
   allowPositionals: true,
   options: {
     repository: { type: "string" },
@@ -32,16 +29,22 @@ if (values.help === true) {
   process.exit(0);
 }
 
-const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+const root = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 
 const tag = positionals[0] ?? process.env.RELEASE_TAG;
 const repository = values.repository ?? process.env.GITHUB_REPOSITORY ?? "";
 
+// pnpm decides workspace membership; directories under packages/ without a package.json are not members.
+const lsOutput = execFileSync("pnpm", ["ls", "-r", "--depth", "-1", "--json"], {
+  cwd: root,
+  encoding: "utf8",
+  maxBuffer: 16 * 1024 * 1024
+});
 const input: ReleaseInput = {
   tag,
   repository,
-  packages: readWorkspacePackages(root, parseWorkspaceGlobs(readFileSync(`${root}/${WORKSPACE_FILE}`, "utf8"))),
+  packages: readManifests(root, parseWorkspaceEntries(root, lsOutput)),
   pendingChangesets: pendingChangesets(root)
 };
 
@@ -74,7 +77,7 @@ if (errors.length > 0) {
   process.exit(1);
 }
 const names = input.packages
-  .filter((pkg) => pkg.manifest.private !== true)
+  .filter(isPublishable)
   .map((pkg) => pkg.manifest.name)
   .join(", ");
 console.log(`check-release: ok (${tag}: ${names})`);

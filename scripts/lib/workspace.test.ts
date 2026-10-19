@@ -1,66 +1,50 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
-  parseWorkspaceGlobs,
-  readWorkspacePackages,
+  isPublishable,
+  parseWorkspaceEntries,
   type ReleaseInput,
   releaseErrors,
-  resolveWorkspaceDirs
+  splitScriptArgs
 } from "./workspace.ts";
 
-const yaml = `# workspace
-packages:
-  # one per domain
-  - packages/*
-  - 'scripts'
-
-minimumReleaseAge: 1440
-`;
-
-const root = mkdtempSync(join(tmpdir(), "workspace-lib-"));
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
-});
-
-describe("parseWorkspaceGlobs", () => {
-  it("reads the packages list and stops at the next key", () => {
-    expect(parseWorkspaceGlobs(yaml)).toEqual(["packages/*", "scripts"]);
-  });
-
-  it("fails without a packages list", () => {
-    expect(() => parseWorkspaceGlobs("minimumReleaseAge: 1440\n")).toThrow("no packages list");
-  });
-});
-
-describe("resolveWorkspaceDirs", () => {
-  it("expands single-segment globs to member directories", () => {
-    mkdirSync(join(root, "packages/example"), { recursive: true });
-    mkdirSync(join(root, "packages/ignored.txt"), { recursive: true });
-    mkdirSync(join(root, "scripts"), { recursive: true });
-    writeFileSync(join(root, "packages/ignored.txt/keep.txt"), "");
-    expect(resolveWorkspaceDirs(root, ["packages/*", "scripts"])).toEqual([
-      "packages/example",
-      "packages/ignored.txt",
-      "scripts"
+describe("splitScriptArgs", () => {
+  it("drops the -- separator pnpm forwards verbatim", () => {
+    expect(splitScriptArgs(["--", "v1.2.3", "--repository", "owner/repo"])).toEqual([
+      "v1.2.3",
+      "--repository",
+      "owner/repo"
     ]);
   });
 
-  it("rejects globs it cannot resolve", () => {
-    expect(() => resolveWorkspaceDirs(root, ["packages/**"])).toThrow("not supported");
+  it("keeps argv without a separator", () => {
+    expect(splitScriptArgs(["v1.2.3", "--verify-git"])).toEqual(["v1.2.3", "--verify-git"]);
   });
 });
 
-describe("readWorkspacePackages", () => {
-  it("reads each member's manifest", () => {
-    mkdirSync(join(root, "packages/example"), { recursive: true });
-    writeFileSync(join(root, "packages/example/package.json"), '{"name":"@scope/example","version":"1.0.0"}');
-    const [pkg] = readWorkspacePackages(root, ["packages/*"]);
-    expect(pkg!.dir).toBe("packages/example");
-    expect(pkg!.manifest.name).toBe("@scope/example");
+describe("parseWorkspaceEntries", () => {
+  it("maps pnpm ls output to workspace-relative directories", () => {
+    const json = JSON.stringify([
+      { name: "project-template-pnpm", path: "/repo", private: true },
+      { name: "@scope/example", version: "1.0.0", path: "/repo/packages/example", private: false },
+      { name: "repo-scripts", version: "0.0.0", path: "/repo/scripts", private: true }
+    ]);
+    expect(parseWorkspaceEntries("/repo", json)).toEqual([
+      { name: "project-template-pnpm", private: true, dir: "." },
+      { name: "@scope/example", version: "1.0.0", private: false, dir: "packages/example" },
+      { name: "repo-scripts", version: "0.0.0", private: true, dir: "scripts" }
+    ]);
+  });
+
+  it("ignores nothing and requires valid JSON", () => {
+    expect(() => parseWorkspaceEntries("/repo", "not json")).toThrow("Unexpected token");
+  });
+});
+
+describe("isPublishable", () => {
+  it("is false for private packages", () => {
+    expect(isPublishable({ dir: "packages/example", manifest: { name: "@scope/example", private: false } })).toBe(true);
+    expect(isPublishable({ dir: "scripts", manifest: { name: "repo-scripts", private: true } })).toBe(false);
   });
 });
 
@@ -102,8 +86,30 @@ describe("releaseErrors", () => {
     expect(releaseErrors(input({ packages: [] }))).toContain("the workspace has no published packages");
   });
 
-  it("rejects a tag that does not match the package version", () => {
-    expect(releaseErrors(input({ tag: "v1.2.4" }))).toEqual(["release tag v1.2.4 does not match @scope/lib@1.2.3"]);
+  it("rejects a tag that does not match the package version and points at versioning.fixed", () => {
+    expect(releaseErrors(input({ tag: "v1.2.4" }))).toEqual([
+      "release tag v1.2.4 does not match @scope/lib@1.2.3 (all published packages release at one shared version; add every published package to the versioning.fixed group in pnpm-workspace.yaml)"
+    ]);
+  });
+
+  it("rejects two published packages that carry different versions", () => {
+    const second = {
+      dir: "packages/other",
+      manifest: {
+        name: "@scope/other",
+        version: "2.0.0",
+        files: ["dist"],
+        publishConfig: { access: "public" },
+        repository: { url: "git+https://github.com/owner/repo.git" }
+      }
+    };
+    expect(releaseErrors(input({ packages: [...input().packages, second] }))).toEqual([
+      "release tag v1.2.3 does not match @scope/other@2.0.0 (all published packages release at one shared version; add every published package to the versioning.fixed group in pnpm-workspace.yaml)"
+    ]);
+  });
+
+  it("reports a missing tag once", () => {
+    expect(releaseErrors(input({ tag: "" }))).toEqual(["release tag is required"]);
   });
 
   it("rejects a prerelease version", () => {
