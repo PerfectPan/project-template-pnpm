@@ -27,6 +27,11 @@ jobs:
         with:
           node-version-file: .node-version
           require-lockfile: true
+      - name: Require the first publish for every published package
+        # pnpm version -r consumes the changesets even when a package has never been published, and publishing a
+        # package name that does not exist yet fails at the npm trusted-publishing exchange. One-Time Setup in
+        # docs/development/release.md publishes a placeholder 0.0.0 first; this step fails until it did.
+        run: node scripts/check-first-publish.ts
       # With pending changesets in .changeset/, runs the version script (`pnpm version -r`), commits the bumped
       # versions, CHANGELOG.md files and ledger through the GitHub API (signed), and opens or updates the draft PR
       # `changeset-release/main` -> `main`. Without pending changesets it does nothing. The bump type is the largest
@@ -37,5 +42,6 @@ jobs:
           commit-message: chore(release): version packages
           pr-title: chore(release): version packages
           pr-draft: always
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+          # The token goes through the input, not the GITHUB_TOKEN environment variable: the action fails when the
+          # env var and the input disagree, which would break a later switch to an App token or PAT.
+          github-token: ${{ github.token }}
