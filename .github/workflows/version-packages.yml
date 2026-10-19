@@ -1,14 +1,7 @@
 name: Version Packages
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Version bump for the lockstep policy (policy uses its nextBump when left as "policy")
-        required: true
-        default: policy
-        type: choice
-        options: [policy, patch, minor, major]
+  workflow_dispatch: {}
 
 permissions: {}
 
@@ -28,32 +21,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # The changelog links and the release branch need full history.
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: pnpm/setup@v3
         with:
           node-version-file: .node-version
-      - run: node common/scripts/install-run-rush.js install
-      - name: Bump versions and write changelogs with Rush
-        env:
-          BUMP: ${{ inputs.bump }}
-        run: |
-          if [[ "$BUMP" == "policy" ]]; then
-            npm run version-packages
-          else
-            node common/scripts/install-run-rush.js version --bump --version-policy main --override-bump "$BUMP"
-            node common/scripts/install-run-rush.js update
-          fi
-      - name: Write the release PR body
-        # The body lists every policy package's changelog section; the script cuts it at a package boundary because
-        # the action would truncate a longer body mid-section.
-        run: node scripts/release-notes.ts > "$RUNNER_TEMP/release-pr-body.md"
-      - name: Create or update the version pull request
-        uses: peter-evans/create-pull-request@v8
+          require-lockfile: true
+      # With pending changesets in .changeset/, runs the version script (`pnpm version -r`), commits the bumped
+      # versions, CHANGELOG.md files and ledger through the GitHub API (signed), and opens or updates the draft PR
+      # `changeset-release/main` -> `main`. Without pending changesets it does nothing. The bump type is the largest
+      # bump across the pending changesets; to release a major, merge a changeset with `major` first.
+      - uses: changesets/action@v2
         with:
-          branch: rush-release/main
-          base: main
-          sign-commits: true
-          commit-message: "chore(release): version packages"
-          title: "chore(release): version packages"
-          draft: always-true
-          body-path: ${{ runner.temp }}/release-pr-body.md
+          version-script: pnpm run version-packages
+          commit-message: chore(release): version packages
+          pr-title: chore(release): version packages
+          pr-draft: always
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
