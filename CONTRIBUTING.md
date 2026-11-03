@@ -75,6 +75,28 @@ gh repo-checks protect --repo OWNER/REPO
 pnpm run publish:dry-run
 ```
 
+## CI Execution Policy
+
+The full CI job in `.github/workflows/ci.yml` runs `pnpm run check` for Ready PRs when they are opened, updated
+with new commits (`synchronize`), reopened, or changed from Draft to Ready. The job skips Draft PR events. The
+existing `push` to `main` trigger is preserved; the Draft condition applies only to pull requests.
+
+Keep work in Draft until local checks are finished. GitHub reports a skipped job as successful, even when it is
+required by branch protection; this is not evidence that tests ran. After marking a PR Ready, confirm the full
+CI job actually executed and passed for the current head and merge result before merging. Existing release PR
+flows that return to Draft after version updates keep their maintainer-controlled Ready step.
+
+The separate `Review` workflow is intentionally lightweight: repository hygiene, title and description checks.
+Keep it active on Draft PRs and metadata edits so authors get feedback before requesting full CI. Bot authors
+remain exempt only from the description check. Full CI has no metadata-edit trigger; after a base-only change,
+update the branch or select Draft then Ready to validate the current comparison. Metadata-only edits receive
+the separate Review checks without repeating the full suite.
+
+Template files do not configure branch protection or rulesets. Preserve the repository's required check names
+and inspect its current merge requirements when adopting this policy; a skipped full-CI check must not be used
+as proof that a Ready PR is safe to merge. See [Repository Setup](#repository-setup) for separately authorized
+repository configuration.
+
 ## Changesets
 
 pnpm builds changelogs and version bumps from changesets in `.changeset/`. A PR that changes what a published

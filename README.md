@@ -83,11 +83,12 @@ publishes nothing, and its scripts call `pnpm -r`, so `pnpm run check` works fro
 
 ## CI and Releases
 
-- `ci.yml` runs `pnpm run check` on pull requests and `main`. `pnpm/setup` installs pnpm and Node from the pinned
-  versions, installs with `--frozen-lockfile`, and caches the pnpm store keyed on the lockfile. Private
-  repositories pay for Actions minutes: there, consider running CI only on `ready_for_review` plus
-  `workflow_dispatch` instead of every push.
-- `review.yml` (from the upstream template) checks repository hygiene, the PR title and the PR description.
+- `ci.yml` runs `pnpm run check` when a Ready PR is opened, updated with new commits, reopened, or marked Ready,
+  and on pushes to `main`. Draft PR events skip the full job; a skipped check is not evidence that tests ran.
+  `pnpm/setup` installs pnpm and Node from the pinned versions, installs with `--frozen-lockfile`, and caches the
+  pnpm store keyed on the lockfile. See [CI Execution Policy](CONTRIBUTING.md#ci-execution-policy).
+- `review.yml` (from the upstream template) keeps lightweight repository hygiene, title and description checks
+  active on Draft PRs and metadata edits, without running the full test suite.
 - `version-packages.yml` (manual) consumes pending changesets and opens the draft PR
   `chore(release): version packages` from `changeset-release/main`.
 - `publish-npm.yml` publishes when a non-prerelease GitHub Release is published.
