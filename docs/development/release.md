@@ -92,12 +92,13 @@ authentication error for that package only.
    each package's `CHANGELOG.md` and records consumption in `.changeset/ledger.yaml`. The action commits through
    the GitHub API (signed) and opens or updates the draft PR `chore(release): version packages` from
    `changeset-release/main`. The PR body lists every released package with its new changelog section.
-3. Start CI on the release PR. Pull requests created with `github.token` do not trigger workflows. Select **Ready
-   for review** (the `ready_for_review` event starts CI), or close and reopen the PR. Pushing an empty commit to
-   the branch also works. To avoid the manual step, pass an App token or a fine-grained PAT to the changesets
-   action's `github-token` input in `.github/workflows/version-packages.yml` — never through the `GITHUB_TOKEN`
-   environment variable, which the action rejects when it differs from the input.
-4. Review the version and changelog diff, wait for green checks, and squash-merge.
+3. Start CI on the release PR by selecting **Ready for review** after reviewing the version update. Each
+   Version Packages update returns the PR to Draft (`pr-draft: always`), so repeat this step after an update.
+   Reopening or pushing to a PR that is still Draft does not execute the full CI job. GitHub can require an
+   authorized maintainer to select **Approve workflows to run** for PR events created with `github.token`;
+   see [GitHub's trigger behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+4. Review the version and changelog diff, confirm the `check` job actually ran and passed for the current head
+   and merge result alongside the Review checks, and squash-merge. A skipped Draft job is not test evidence.
 5. Check the release identity locally on the merged release commit:
 
    ```bash
@@ -165,9 +166,13 @@ Run it after `pnpm run check` so `dist` exists.
   and blocks the version number permanently; prefer deprecation.
 - Once any package of a version is on npm, do not move or reuse its tag. Fix forward with a new version.
 
-## CI Trigger Options
+## CI Trigger Policy
 
-`ci.yml` runs on ordinary `pull_request` and `push` events, which is enough for a single-maintainer repository. A
-repository that wants CI to validate an exact head/base pair, or to skip CI on drafts, can replace it with a
-`workflow_dispatch` workflow that takes `head_sha`/`base_sha` inputs and re-checks the PR head before and after the
-run. That design costs a manual trigger per PR; adopt it only when stale or racing CI results are a real problem.
+`ci.yml` runs the full `check` job for non-Draft PRs on `opened`, `synchronize`, `reopened`, and
+`ready_for_review`, and keeps the existing push-to-`main` run. Draft PR events skip the full job while the
+lightweight Review workflow remains active. No manual CI trigger is added. See
+[CI Execution Policy](../../CONTRIBUTING.md#ci-execution-policy) for skipped-check and merge requirements.
+
+The PR checkout validates GitHub's merge result. If only the base changes, update the PR branch or select Draft
+then Ready to obtain a fresh run for the current comparison before merging. Metadata edits run the separate
+Review workflow without repeating the full suite.
