@@ -41,13 +41,9 @@ pnpm run test
 pnpm --filter @scope/example run test
 
 # Record a release note for changed packages. Non-interactive form (works without a terminal):
-pnpm change @scope/example --bump patch --summary "Update runtime dependencies."
-# Interactive prompt (needs a terminal); preview with `pnpm change status`:
-pnpm change
-
-# Release identity check and publish dry run (dry run never uploads):
-pnpm run release:check -- vX.Y.Z --repository OWNER/REPO
-pnpm run publish:dry-run
+pnpm changeset add --patch @scope/example -m "Update runtime dependencies."
+# Interactive prompt (needs a terminal); preview with `pnpm changeset status --verbose`:
+pnpm changeset
 
 # Repository, PR/MR title and description checks:
 gh repo-checks repository
@@ -62,8 +58,8 @@ Workspace members are listed in `pnpm-workspace.yaml`. Publishable packages live
 `scripts/` is the private `repo-scripts` package for repository automation written in TypeScript and run directly
 by Node. Shared dependency versions live in the `pnpm-workspace.yaml` catalog, referenced as `catalog:`;
 `catalogMode: strict` makes `pnpm add` of an already-cataloged package at an off-catalog version fail, but it does
-not police hand-edited manifests, so keep shared versions in the catalog deliberately. All published packages
-release at one shared version through the `versioning.fixed` group. Every package defines the `build`,
+not police hand-edited manifests, so keep shared versions in the catalog deliberately. Changesets in
+`.changeset/` drive releases. Every package defines the `build`,
 `lint`, `typecheck`, `test`, `format` and `format:check` scripts that the root shortcuts call.
 `docs/development/release.md` is the release runbook.
 
@@ -85,11 +81,12 @@ For non-trivial changes:
 ## Releases
 
 - A PR that changes what a published package ships (source, manifest, build config) or the lockfile includes a
-  changeset under `.changeset/`. Create it with `pnpm change`, or write the file directly (format in
-  `CONTRIBUTING.md`). Changesets are not CI-enforced in this template; adding one is the maintainer's call.
-- Never bump versions, edit generated `CHANGELOG.md` files, create release tags, or publish by hand. The
-  `Version Packages` workflow prepares versions, and publishing a GitHub Release runs `publish-npm.yml`.
-  Follow `docs/development/release.md`.
+  changeset under `.changeset/`. Create it with `pnpm changeset`, or write the file directly (format in
+  `CONTRIBUTING.md`). Changesets are not CI-enforced; adding one is the maintainer's call.
+- Never bump versions, edit generated `CHANGELOG.md` files, create release tags, or publish by hand. Every push to
+  `main` runs the one Release workflow (`publish-npm.yml`): while changesets are pending it opens or updates the
+  draft version PR, and once a merged version PR has consumed them it publishes and tags and releases each
+  package. Follow `docs/development/release.md`.
 - Workspace dependencies between packages use `workspace:*`; pnpm replaces them with exact versions when packing.
 
 ## Repository Architecture
