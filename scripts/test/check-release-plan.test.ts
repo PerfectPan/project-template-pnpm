@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-const script = resolve(import.meta.dirname, "check-release-plan.mjs");
+const script = resolve(import.meta.dirname, "../check-release-plan.mjs");
 const workspaces: string[] = [];
 
-function workspaceWithRecord(releases: Record<string, string>) {
+function workspaceWithRecord(releases: Record<string, string>, ignore: string[] = []) {
   const root = mkdtempSync(join(tmpdir(), "template-release-plan-"));
   workspaces.push(root);
   const write = (path: string, content: unknown) => {
@@ -21,7 +21,8 @@ function workspaceWithRecord(releases: Record<string, string>) {
   write("packages/u/package.json", { name: "u", private: true, version: "0.0.1" });
   write(".changeset/config.json", {
     changelog: false,
-    fixed: [["a", "b"]],
+    fixed: [],
+    ignore,
     privatePackages: { version: false, tag: false }
   });
   const frontmatter = Object.entries(releases)
@@ -42,24 +43,38 @@ afterEach(() => {
 });
 
 describe("check-release-plan", () => {
-  it("accepts minor and patch records for the fixed group", () => {
+  it("accepts minor and patch records", () => {
     const result = check(workspaceWithRecord({ a: "minor", b: "patch" }));
 
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
   });
 
-  it("rejects a major record", () => {
+  it("accepts a major record", () => {
     const result = check(workspaceWithRecord({ a: "major" }));
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(".changeset/record.md requests a major bump");
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
   });
 
-  it("rejects a record for a package outside the fixed group, which changeset version never consumes", () => {
-    const result = check(workspaceWithRecord({ u: "patch" }));
+  it.each(["patch", "none"])("rejects a private package's %s record", (type) => {
+    const result = check(workspaceWithRecord({ u: type }));
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(".changeset/record.md names u, which is not released");
+    expect(result.stderr).toContain(".changeset/record.md names u, which is not versioned");
+  });
+
+  it.each(["patch", "none"])("rejects an ignored package's %s record", (type) => {
+    const result = check(workspaceWithRecord({ a: type }, ["a"]));
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(".changeset/record.md names a, which is not versioned");
+  });
+
+  it("accepts a public package's none record", () => {
+    const result = check(workspaceWithRecord({ a: "none" }));
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
   });
 });

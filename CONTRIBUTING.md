@@ -211,7 +211,7 @@ Update the description when review feedback, rebases, or follow-up commits chang
 
 ## Release Notes
 
-Release notes come from the release tool. `pnpm version -r` writes each published package's `CHANGELOG.md` from the changesets in `.changeset/` (see [Changesets](#changesets)) and records consumption in `.changeset/ledger.yaml`. Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
+Release notes come from the release tool. `pnpm run version-packages` writes each published package's `CHANGELOG.md` from the changesets in `.changeset/` (see [Changesets](#changesets)) and deletes consumed records. Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
 
 ## License
 

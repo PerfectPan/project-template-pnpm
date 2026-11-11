@@ -44,20 +44,19 @@ jobs:
           # The store cache is keyed on the lockfile content hash; the action restores before installing.
           cache: true
 
-      # Lists the public package versions that npm does not have yet. It is empty while every committed version is
-      # on npm, so the release gates run for a merged version pull request, a retried publish, or pushes that follow a
-      # version that is still unpublished.
-      - name: Find packages to publish
-        id: plan
-        run: |
-          pnpm exec changeset publish-plan --output "$RUNNER_TEMP/publish-plan.json"
-          echo "count=$(jq '[.plan[][]] | length' "$RUNNER_TEMP/publish-plan.json")" >> "$GITHUB_OUTPUT"
+      - name: Select release mode
+        id: mode
+        uses: changesets/action/select-mode@v2.1.2
+
+      - name: Check first-publish setup
+        if: steps.mode.outputs.mode != 'none'
+        run: node scripts/check-first-publish.mjs '${{ steps.mode.outputs.mode }}'
 
       - name: Run release gates
-        if: steps.plan.outputs.count != '0'
+        if: steps.mode.outputs.mode == 'publish'
         run: pnpm run check
       - name: Audit production dependencies
-        if: steps.plan.outputs.count != '0'
+        if: steps.mode.outputs.mode == 'publish'
         run: pnpm audit --prod --audit-level=high
 
       # With pending change records, runs version-packages and opens or updates the draft pull request
@@ -68,6 +67,7 @@ jobs:
       # GitHub API, so GitHub signs it. The publish script stays set even when the gates were skipped: without one,
       # the action's version pull request body tells maintainers to publish by hand.
       - name: Create the version pull request or publish
+        if: steps.mode.outputs.mode != 'none'
         uses: changesets/action@v2.1.2
         with:
           # The action runs these commands without a shell.

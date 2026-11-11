@@ -20,13 +20,16 @@ workflow is not a published package.
 
 `publish-npm.yml` runs on every push to `main` (a PR merge is a push) and on manual dispatch. One job:
 
-1. `changeset publish-plan` lists the public package versions npm does not have yet. While that list is empty —
-   for example a docs push after a release — the workflow stops after it.
-2. With something to publish, the repository's complete gate (`pnpm run check`, which includes
+1. `changesets/action/select-mode@v2.1.2` selects `version` for pending records, `publish` for unpublished
+   versions without pending records, or `none` when there is no release work. `none` skips the remaining steps.
+2. `check-first-publish.mjs` uses `npm view` to require an existing npm version before versioning or publishing.
+   In `version` mode it checks only the release plan's affected public packages, so an unrelated new package
+   does not block an existing package's version PR. In `publish` mode it checks all public, non-ignored packages.
+3. Only in `publish` mode, the repository's complete gate (`pnpm run check`, which includes
    `scripts/check-release-plan.mjs`) and a production-dependency audit run before anything is published.
-3. `changesets/action` then decides: with pending change records it runs `version-packages` and opens or updates
-   the draft version PR; with none it publishes the unpublished versions and tags each published package. The
-   version commit goes through the GitHub API, so GitHub signs it.
+4. `changesets/action@v2.1.2` owns versioning and publication: it opens or updates the draft version PR, or
+   publishes the unpublished versions and tags each published package. The version commit goes through the
+   GitHub API, so GitHub signs it.
 
 Runs share one concurrency group with `cancel-in-progress: false`: a push waits for the running run, and GitHub
 keeps only the newest waiting run, cancelling older waiting ones.
@@ -54,27 +57,29 @@ Correct the example export.
 
 The summary becomes the changelog entry, so write it for users of the package. Rules for the bump:
 
-- While a package is 0.x, a breaking change is `minor`. `major` would release 1.0.0; `check-release-plan.mjs`
-  rejects major bumps until a reviewed PR lifts the cap.
+- Use `patch` for fixes, `minor` for features and `major` for a breaking release. The template permits major
+  bumps, including the move from 0.x to 1.0.0; a repository can adopt a narrower policy deliberately.
 - A record naming only a private or ignored package is never consumed by `changeset version`, so it stays pending
   and the flow would never publish again; `check-release-plan.mjs` rejects it. Move its note to a published
-  package or delete the record.
+  package or delete the record. This applies to `none` records too. The check uses Changesets' own
+  `shouldSkipPackage` with the repository's parsed configuration.
 - `pnpm changeset status --verbose` prints the pending changesets and the versions they would release.
 
 ## Versioning Configuration
 
 `.changeset/config.json` sets `privatePackages: { version: false, tag: false }`, so private packages are never
 versioned or tagged, and `changelog-github` writes PR links and author thanks into each package's `CHANGELOG.md`.
+It reads `GITHUB_REPOSITORY` from Actions, so repositories created from the template link to themselves. Local
+version previews need both `GITHUB_REPOSITORY=OWNER/REPO` and `GITHUB_TOKEN`.
 The example package versions independently (`fixed: []`). When a second published package appears, decide between
 a `fixed` group (lockstep releases at one shared version) and independent versions, and document the choice here.
 
 ## First Releases
 
 Publishing a package name that has never existed on npm fails at the trusted-publishing exchange: OIDC cannot
-create package names. `changeset version` still consumes the pending records and bumps the manifest version, so
-the first version PR merges normally and the publish fails at the exchange. Finish the first publish (One-Time
-Setup below) and re-run the failed run; it publishes the already-bumped version. The placeholder `0.0.0` never
-collides with real releases, which are higher: the kept `minor` "Initial release." changeset bumps
+create package names. `check-first-publish.mjs` stops before creating a version PR for a new package name.
+Finish the first publish (One-Time Setup below), configure its trusted publisher and re-run the failed run.
+The placeholder `0.0.0` never collides with real releases, which are higher: the kept `minor` "Initial release." changeset bumps
 `0.0.0 → 0.1.0` in the first version PR.
 
 ## One-Time Setup
@@ -152,8 +157,8 @@ authentication error for that package only.
 4. Review the version and changelog diff, confirm the `check` job actually ran and passed for the current head
    and merge result alongside the Review checks, and squash-merge. A skipped Draft job is not test evidence.
    Merging the version PR is the release decision.
-5. The merge push runs the Release workflow on the merge commit, where no record is pending: `publish-plan` lists
-   the new versions, the gates run, and `changeset publish` publishes each unpublished public version in
+5. The merge push runs the Release workflow on the merge commit, where no record is pending: select-mode chooses
+   `publish`, the gates run, and `changeset publish` publishes each unpublished public version in
    dependency order through Trusted Publishing. The action pushes one tag per published package
    (`<name>@<version>`) and creates one GitHub Release per package with its changelog section.
 6. Verify every package at the new version, for example `npm view @scope/example@X.Y.Z`, `git ls-remote --tags
@@ -202,7 +207,7 @@ it can.
   tags the rest on the run's commit. **Run workflow** on `main` does the same only while no record is pending, and
   it tags the current `main` commit instead of the release commit. Never bump the version to retry, and never
   unpublish.
-- **Published but the tag or Release is missing**: `publish-plan` no longer lists the version, so re-runs do not
+- **Published but the tag or Release is missing**: the version is already on npm, so re-runs do not
   add them. Create them by hand on the release commit:
   `gh release create '<name>@X.Y.Z' --target <release commit>` (the tag format from step 5) with the package's
   changelog section as notes.
