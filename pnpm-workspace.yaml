@@ -12,7 +12,7 @@ catalog:
   # pnpm can only satisfy that peer through the override below. Keep the version in lockstep with the
   # `vite-plus` entry (same release train; Dependabot does not see the mapping).
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
-  '@perfectpan/lint-config': github:PerfectPan/lint-config#v0.6.0
+  '@perfectpan/lint-config': github:PerfectPan/lint-config#v0.7.1
   '@types/node': 24.19.2
   typescript: 7.0.2
   vite-plus: 1.1.0

@@ -14,7 +14,7 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
 | Monorepo | pnpm 12.8.1 workspace, pinned in the root `package.json` `packageManager` field; members in `pnpm-workspace.yaml` |
 | Runtime | Node.js `^26.13.1` for development and CI; `.node-version` selects major 26. `engines` and `devEngines.runtime` enforce the security floor (`>=26.13.1 <27`), and CI resolves the latest matching release |
 | Language | TypeScript 7.0.2, `tsconfig` extends `@perfectpan/lint-config/tsconfig/node.json` |
-| Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.6.0; type check stays `tsc` |
+| Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.7.1; type check stays `tsc` |
 | Tests | Vitest 5 bundled in Vite+; test files import from `vite-plus/test` |
 | Shared versions | External dependencies used by workspace packages live in the `pnpm-workspace.yaml` catalog; `catalogMode: strict` rejects `pnpm add` of a cataloged package at an off-catalog version |
 | Releases | Changesets (`pnpm changeset`) with `changesets/action`: automatic draft version PR on `main`, npm Trusted Publishing with provenance, one tag and GitHub Release per published package |

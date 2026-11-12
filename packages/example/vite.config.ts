@@ -2,8 +2,8 @@ import { fmt, lint } from "@perfectpan/lint-config/vite-plus";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
-  // The generated changelog is release output, not a repository source; dist is build output.
-  fmt: { ...fmt, ignorePatterns: ["CHANGELOG.*"] },
+  // The shared fmt skips the generated CHANGELOG.*; dist is build output.
+  fmt,
   lint: { ...lint, ignorePatterns: ["dist/**"] },
   pack: {
     // One entry per subpath export: "." builds src/index.ts into dist/index.js with its declarations.
