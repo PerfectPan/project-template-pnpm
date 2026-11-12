@@ -64,7 +64,7 @@ pnpm-workspace.yaml           workspace members, the shared dependency catalog, 
 pnpm-lock.yaml                the one lockfile for the whole workspace
 .changeset/                   pending change records, consumed by the Release workflow
 packages/example/             example public library: src, vp pack build to dist, vite-plus/test suite
-scripts/                      repo-scripts project (check-release-plan.mjs) and the template's shell checks
+scripts/                      repo-scripts project and the template's shell checks
 .github/workflows/            ci.yml, review.yml, publish-npm.yml
 docs/development/release.md   release runbook
 ```
@@ -90,10 +90,10 @@ publishes nothing, and its scripts call `pnpm -r`, so `pnpm run check` works fro
   pnpm store keyed on the lockfile. See [CI Execution Policy](CONTRIBUTING.md#ci-execution-policy).
 - `review.yml` (from the upstream template) keeps lightweight repository hygiene, title and description checks
   active on Draft PRs and metadata edits, without running the full test suite.
-- `publish-npm.yml` runs on every push to `main`: with pending change records it opens or updates the draft PR
-  `chore(release): version packages` from `changeset-release/main`; when a merged version PR has consumed them it
-  publishes through npm Trusted Publishing and tags and releases each package. See
-  [`docs/development/release.md`](docs/development/release.md).
+- `publish-npm.yml` calls the shared npm release workflow of PerfectPan/gh-repo-checks on every push to `main`:
+  with pending change records it opens or updates the draft PR `chore(release): version packages` from
+  `changeset-release/main`; when a merged version PR has consumed them it publishes through npm Trusted Publishing
+  and tags and releases each package. See [`docs/development/release.md`](docs/development/release.md).
 - Dependabot updates npm dependencies and GitHub Actions weekly with `chore(deps)` titles. Dependabot officially
   supports pnpm 7–10; on pnpm 12 its support is limited (dependabot-core#16397), so a PR may edit `package.json`
   or the catalog without regenerating `pnpm-lock.yaml` — run `pnpm install` and commit the lockfile on the branch

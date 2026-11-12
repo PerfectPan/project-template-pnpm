@@ -27,4 +27,8 @@ jobs:
           require-lockfile: true
           # The store cache is keyed on the lockfile content hash; the action restores before installing.
           cache: true
+      # A pending record that names only a private or ignored package is never consumed and blocks every release.
+      - uses: PerfectPan/gh-repo-checks@v1
+        with:
+          check: release-plan
       - run: pnpm run check
