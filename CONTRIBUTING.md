@@ -36,8 +36,7 @@ Dependencies shared with other workspace packages come from the `pnpm-workspace.
 (`"dependency": "catalog:"`); `catalogMode: strict` makes `pnpm add` of an already-cataloged package at an
 off-catalog version fail, but it does not police hand-edited manifests, so keep shared versions in the catalog
 deliberately. A published package needs a stable `version`, a `repository.url` pointing at this GitHub repository,
-`publishConfig.access: "public"`, a `files` list, and a place in the `versioning.fixed` group in
-`pnpm-workspace.yaml`; a private tool package sets `"private": true`.
+`publishConfig.access: "public"`, and a `files` list; a private tool package sets `"private": true`.
 
 ## Contribution Flow
 
@@ -74,8 +73,6 @@ gh repo-checks pr-body pr-body.md
 # GitHub repository setup dry run:
 gh repo-checks protect --repo OWNER/REPO
 
-# Package or release dry-run:
-pnpm run publish:dry-run
 ```
 
 ## CI Execution Policy
@@ -102,18 +99,18 @@ repository configuration.
 
 ## Changesets
 
-pnpm builds changelogs and version bumps from changesets in `.changeset/`. A PR that changes what a published
-package ships (source, manifest, build config) or the lockfile should include one:
+Changesets build changelogs and version bumps from change records in `.changeset/`. A PR that changes what a
+published package ships (source, manifest, build config) or the lockfile should include one:
 
 ```bash
-pnpm change
+pnpm changeset
 ```
 
-`pnpm change` asks for the affected packages, a bump type (`patch`, `minor`, `major`) and a user-facing message.
+`pnpm changeset` asks for the affected packages, a bump type (`patch`, `minor`, `major`) and a user-facing message.
 Without a terminal, pass them explicitly:
 
 ```bash
-pnpm change @scope/example --bump patch --summary "Update runtime dependencies."
+pnpm changeset add --patch @scope/example -m "Update runtime dependencies."
 ```
 
 Or write the file directly (this is what the command produces):
@@ -126,10 +123,11 @@ Or write the file directly (this is what the command produces):
 Update runtime dependencies.
 ```
 
-The file name is a short kebab-case slug. `pnpm change status` previews what pending changesets would release, and
-`pnpm version -r` (the `version-packages` script) consumes them. Tests, fixtures and Markdown changes usually do
-not need a changeset; changesets are not CI-enforced in this template, so whether a change rides a release is the
-maintainer's call. See [`docs/development/release.md`](docs/development/release.md) for the release procedure.
+The file name is a short kebab-case slug. `pnpm changeset status --verbose` previews what pending changesets would
+release, and the Release workflow's version pull request (`changeset version`) consumes them. Tests, fixtures and
+Markdown changes usually do not need a changeset; changesets are not CI-enforced, so whether a change rides a
+release is the maintainer's call. See [`docs/development/release.md`](docs/development/release.md) for the release
+procedure.
 
 ## SDD Workflow And Document Lifecycle
 
@@ -213,7 +211,7 @@ Update the description when review feedback, rebases, or follow-up commits chang
 
 ## Release Notes
 
-Release notes come from the release tool. `pnpm version -r` writes each published package's `CHANGELOG.md` from the changesets in `.changeset/` (see [Changesets](#changesets)) and records consumption in `.changeset/ledger.yaml`. Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
+Release notes come from the release tool. `pnpm run version-packages` writes each published package's `CHANGELOG.md` from the changesets in `.changeset/` (see [Changesets](#changesets)) and deletes consumed records. Do not edit generated changelogs or keep a hand-written root `CHANGELOG.md` beside them.
 
 ## License
 

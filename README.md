@@ -17,7 +17,7 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
 | Toolchain | Vite+ (`vp`) 1.1.0 for build (`vp pack`), lint (`vp lint`), format (`vp fmt`) and tests (`vp test`); shared settings from [`@perfectpan/lint-config`](https://github.com/PerfectPan/lint-config) v0.6.0; type check stays `tsc` |
 | Tests | Vitest 5 bundled in Vite+; test files import from `vite-plus/test` |
 | Shared versions | External dependencies used by workspace packages live in the `pnpm-workspace.yaml` catalog; `catalogMode: strict` rejects `pnpm add` of a cataloged package at an off-catalog version |
-| Releases | pnpm release management (`pnpm change`, `pnpm version -r`) with all published packages in one `versioning.fixed` lockstep group, the changesets GitHub action for the version PR, npm Trusted Publishing with provenance |
+| Releases | Changesets (`pnpm changeset`) with `changesets/action`: automatic draft version PR on `main`, npm Trusted Publishing with provenance, one tag and GitHub Release per published package |
 
 ## Quick Start
 
@@ -59,10 +59,10 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
 ```text
 pnpm-workspace.yaml           workspace members, the shared dependency catalog, pnpm and release settings
 pnpm-lock.yaml                the one lockfile for the whole workspace
-.changeset/                   pending changesets, consumed by Version Packages
+.changeset/                   pending change records, consumed by the Release workflow
 packages/example/             example public library: src, vp pack build to dist, vite-plus/test suite
-scripts/                      repo-scripts project (check-release.ts) and the template's shell checks
-.github/workflows/            ci.yml, review.yml, version-packages.yml, publish-npm.yml
+scripts/                      repo-scripts project (check-release-plan.mjs) and the template's shell checks
+.github/workflows/            ci.yml, review.yml, publish-npm.yml
 docs/development/release.md   release runbook
 ```
 
@@ -76,10 +76,8 @@ publishes nothing, and its scripts call `pnpm -r`, so `pnpm run check` works fro
 | `pnpm run check` | `format:check`, `build`, `lint`, `typecheck`, `test` (repository checks run in the Review workflow and the pre-commit hook) |
 | `pnpm run build` / `lint` / `typecheck` / `test` / `format` / `format:check` | `pnpm -r run <task>`: the task in every workspace package that defines it |
 | `pnpm --filter @scope/example run test` | one package's task; add `...` after the name to include its workspace dependencies |
-| `pnpm change` | record a changeset for changed packages |
-| `pnpm run version-packages` | `pnpm version -r`: consume changesets, bump versions, write changelogs |
-| `pnpm run release:check -- vX.Y.Z --repository OWNER/REPO` | tag, version, manifest and pending-changeset checks before publishing |
-| `pnpm run publish:dry-run` | `pnpm publish -r --dry-run --json`: prints, per package a publish would upload, the version and the file list. Run it after `pnpm run check` so `dist` exists |
+| `pnpm changeset` | record a change for the affected published packages |
+| `pnpm run version-packages` | `changeset version`: consume change records, bump versions, write changelogs |
 
 ## CI and Releases
 
@@ -89,9 +87,10 @@ publishes nothing, and its scripts call `pnpm -r`, so `pnpm run check` works fro
   pnpm store keyed on the lockfile. See [CI Execution Policy](CONTRIBUTING.md#ci-execution-policy).
 - `review.yml` (from the upstream template) keeps lightweight repository hygiene, title and description checks
   active on Draft PRs and metadata edits, without running the full test suite.
-- `version-packages.yml` (manual) consumes pending changesets and opens the draft PR
-  `chore(release): version packages` from `changeset-release/main`.
-- `publish-npm.yml` publishes when a non-prerelease GitHub Release is published.
+- `publish-npm.yml` runs on every push to `main`: with pending change records it opens or updates the draft PR
+  `chore(release): version packages` from `changeset-release/main`; when a merged version PR has consumed them it
+  publishes through npm Trusted Publishing and tags and releases each package. See
+  [`docs/development/release.md`](docs/development/release.md).
 - Dependabot updates npm dependencies and GitHub Actions weekly with `chore(deps)` titles. Dependabot officially
   supports pnpm 7–10; on pnpm 12 its support is limited (dependabot-core#16397), so a PR may edit `package.json`
   or the catalog without regenerating `pnpm-lock.yaml` — run `pnpm install` and commit the lockfile on the branch

@@ -1,46 +1,86 @@
 # npm Release Runbook
 
-pnpm owns change records (`pnpm change`), version bumps (`pnpm version -r`) and changelogs. Published packages
-under `packages/` are published to npm by GitHub Actions with npm Trusted Publishing (OIDC) and provenance. No
-long-lived npm token is stored in the repository or its secrets.
+Changesets owns change records (`pnpm changeset`), version bumps and changelogs (`changeset version`) and
+publishing (`changeset publish`), configured in `.changeset/config.json`. Published packages under `packages/` are
+published to npm by GitHub Actions with npm Trusted Publishing (OIDC) and provenance. A merged version PR
+publishes, and the workflow pushes one tag `<name>@<version>` and creates one GitHub Release per published
+package. No long-lived npm token is stored in the repository or its secrets.
 
 | Step | Where | Result |
 | --- | --- | --- |
-| Changeset | feature PR | `.changeset/<name>.md`, written with `pnpm change` or by hand |
-| Version Packages | `version-packages.yml` (manual) | draft PR `chore(release): version packages` on `changeset-release/main`; the PR body lists each release |
-| Release PR merge | GitHub | bumped `package.json` versions, `CHANGELOG.md` per package, `.changeset/ledger.yaml`, no pending changesets |
-| GitHub Release | GitHub UI or `gh release create` | tag `vX.Y.Z` on the release commit |
-| Publish | `publish-npm.yml` (on Release `published`) | packages on npm with provenance |
+| Changeset | feature PR | `.changeset/<name>.md`, written with `pnpm changeset` or by hand; CI does not check for it |
+| Version PR | `publish-npm.yml`, on each push to `main` with pending changesets | draft PR `chore(release): version packages` from `changeset-release/main`, whose body lists each package's new changelog section |
+| Version PR merge | GitHub, the only manual step | bumped `package.json` versions and `CHANGELOG.md` per package on `main`, no pending changesets |
+| Publish | `publish-npm.yml`, on the merge push | the release gates run, packages publish, and the workflow pushes one tag and creates one GitHub Release per package |
 
-Each row is a separate completion state. A merged release PR is not a published release, and a started publish
+Each row is a separate completion state. A merged version PR is not a published release, and a started publish
 workflow is not a published package.
+
+## The Release Workflow
+
+`publish-npm.yml` runs on every push to `main` (a PR merge is a push) and on manual dispatch. One job:
+
+1. `changesets/action/select-mode@v2.1.2` selects `version` for pending records, `publish` for unpublished
+   versions without pending records, or `none` when there is no release work. `none` skips the remaining steps.
+2. `check-first-publish.mjs` uses `npm view` to require an existing npm version before versioning or publishing.
+   In `version` mode it checks only the release plan's affected public packages, so an unrelated new package
+   does not block an existing package's version PR. In `publish` mode it checks all public, non-ignored packages.
+3. Only in `publish` mode, the repository's complete gate (`pnpm run check`, which includes
+   `scripts/check-release-plan.mjs`) and a production-dependency audit run before anything is published.
+4. `changesets/action@v2.1.2` owns versioning and publication: it opens or updates the draft version PR, or
+   publishes the unpublished versions and tags each published package. The version commit goes through the
+   GitHub API, so GitHub signs it.
+
+Runs share one concurrency group with `cancel-in-progress: false`: a push waits for the running run, and GitHub
+keeps only the newest waiting run, cancelling older waiting ones.
+
+## Changesets
+
+A PR that changes what a published package ships (source, manifest, build config) or the lockfile carries a
+changeset. CI does not check for a missing one; the author adds it and the reviewer looks for it. Write it with:
+
+```bash
+pnpm changeset add --patch @scope/example -m "Correct the example export."
+```
+
+Interactive form: `pnpm changeset` prompts for the packages, the bump and the message, and needs a terminal. Name
+every affected published package when a change affects several. The command writes `.changeset/<name>.md`, which
+you can also write by hand under any short kebab-case name:
+
+```markdown
+---
+"@scope/example": patch
+---
+
+Correct the example export.
+```
+
+The summary becomes the changelog entry, so write it for users of the package. Rules for the bump:
+
+- Use `patch` for fixes, `minor` for features and `major` for a breaking release. The template permits major
+  bumps, including the move from 0.x to 1.0.0; a repository can adopt a narrower policy deliberately.
+- A record naming only a private or ignored package is never consumed by `changeset version`, so it stays pending
+  and the flow would never publish again; `check-release-plan.mjs` rejects it. Move its note to a published
+  package or delete the record. This applies to `none` records too. The check uses Changesets' own
+  `shouldSkipPackage` with the repository's parsed configuration.
+- `pnpm changeset status --verbose` prints the pending changesets and the versions they would release.
 
 ## Versioning Configuration
 
-`pnpm-workspace.yaml` sets `versioning.changelog.storage: repository`, so `pnpm version -r` deletes consumed
-changesets immediately and commits each package's `CHANGELOG.md`. The default (`registry`) keeps changesets until
-the registry confirms publication; the changesets action would then keep reopening a version PR forever, because
-it decides from the remaining `.changeset/*.md` files.
-
-All published packages release in lockstep through the `versioning.fixed` group: `pnpm version -r` bumps the whole
-group together at one shared version, and one release tag covers it — `scripts/check-release.ts` requires every
-published package to carry the tag's version and says so when a package lags behind. Add every new published
-package to the group. A package that should never version belongs in `versioning.ignore`.
-
-`pnpm change status` previews the pending release plan, and `pnpm change check` validates committed versions
-against `versioning.fixed` groups without reading intents.
+`.changeset/config.json` sets `privatePackages: { version: false, tag: false }`, so private packages are never
+versioned or tagged, and `changelog-github` writes PR links and author thanks into each package's `CHANGELOG.md`.
+It reads `GITHUB_REPOSITORY` from Actions, so repositories created from the template link to themselves. Local
+version previews need both `GITHUB_REPOSITORY=OWNER/REPO` and `GITHUB_TOKEN`.
+The example package versions independently (`fixed: []`). When a second published package appears, decide between
+a `fixed` group (lockstep releases at one shared version) and independent versions, and document the choice here.
 
 ## First Releases
 
-Publishing a package name that has never existed on npm fails at the trusted-publishing exchange (OIDC cannot
-create package names), while `pnpm version -r` consumes the changesets either way. The Version Packages workflow
-therefore runs `scripts/check-first-publish.ts` first and fails while any published package has no version on npm.
-
-This is why the setup below publishes a placeholder `0.0.0` once. Afterwards the first Version Packages run bumps
-`0.0.0 → 0.1.0` from the kept `minor` "Initial release." changeset in `.changeset/`. Measured on pnpm 12.8.1: with
-the `versioning.fixed` group, the pending intent applies to the group's shared version even before that version
-was ever published; without a fixed group, pnpm's rule (11.16+) is that a never-published package debuts at its
-manifest version verbatim and pending changesets apply from the next release only.
+Publishing a package name that has never existed on npm fails at the trusted-publishing exchange: OIDC cannot
+create package names. `check-first-publish.mjs` stops before creating a version PR for a new package name.
+Finish the first publish (One-Time Setup below), configure its trusted publisher and re-run the failed run.
+The placeholder `0.0.0` never collides with real releases, which are higher: the kept `minor` "Initial release." changeset bumps
+`0.0.0 → 0.1.0` in the first version PR.
 
 ## One-Time Setup
 
@@ -49,10 +89,11 @@ manifest version verbatim and pending changesets apply from the next release onl
 1. Keep the repository public. pnpm attaches provenance only when the repository and the package are public; from a
    private repository it publishes without provenance.
 2. Every published `package.json` has `repository.url` pointing at this GitHub repository (`git+https://github.com/OWNER/REPO.git`)
-   and `publishConfig.access: "public"`. npm rejects provenance when the repository does not match, and
-   `pnpm run release:check` enforces both.
+   and `publishConfig.access: "public"`, and lists published files in `files`. npm rejects provenance when the
+   repository does not match, and a scoped package without public access cannot publish.
 3. Let GitHub Actions create pull requests: **Settings → Actions → General → Workflow permissions → Allow GitHub
-   Actions to create and approve pull requests**. Version Packages fails without it.
+   Actions to create and approve pull requests**. The Release workflow fails without it, on the first push to `main`
+   that leaves changesets pending.
 
 ### npm Trusted Publisher, per package
 
@@ -70,65 +111,64 @@ exists. For each package:
    ```
 
    Scoped packages need an npm organization or user scope that the maintainer owns. Skip this step if the name
-   already exists on npm. Until the placeholder exists, the Version Packages workflow fails its first-publish check
-   (`scripts/check-first-publish.ts`) instead of consuming changesets for a package that cannot publish.
+   already exists on npm.
 2. On npmjs.com open the package **Settings → Trusted Publisher → GitHub Actions** and enter the owner, the
    repository, the workflow filename `publish-npm.yml`, and no environment (unless you add one to the workflow).
+   The trusted publisher is bound to that file name, so renaming the workflow means configuring it again.
+   Enable **direct publishing** ("Allow npm publish"): new configurations default to staged publishing only, and
+   `pnpm publish` then fails with an authorization error. The CLI equivalent (npm 11.15 or later, two-factor
+   authentication on the account) is:
+
+   ```bash
+   npm trust github @scope/example --repo OWNER/REPO --file publish-npm.yml --allow-publish
+   npm trust list @scope/example
+   ```
+
+   A new configuration expires unless a publish uses it within 2 days, so create it right before merging the first
+   version PR, not days ahead.
 3. Under **Publishing access**, select "Require two-factor authentication and disallow tokens" so that only the
    trusted workflow can publish.
+
+The workflow filename in the form is `publish-npm.yml`, the file `.github/workflows/publish-npm.yml`. Its
+`release` job sets `permissions.id-token: write` (that permission is the OIDC token the exchange requires) and
+sets no `environment:`, which is why the form's environment stays empty. The job does not read `NPM_TOKEN` or
+`NODE_AUTH_TOKEN`. A form whose workflow filename or environment does not match this file fails the exchange even
+after the placeholder publish.
 
 One package's trusted publisher does not authorize another. A publish for an unconfigured package fails with an
 authentication error for that package only.
 
 ## Cutting a Release
 
-1. Merge feature PRs that carry changesets (`.changeset/*.md`). Changesets are not CI-enforced; whether a change
-   rides a release is the maintainer's call. The release bump is the largest bump across the pending changesets —
-   to release a major, merge a `major` changeset first.
-2. Run **Actions → Version Packages → Run workflow** on `main`. The workflow first requires every published
-   package to have a version on npm — a missing first publish fails the run (see One-Time Setup). The changesets
-   action runs `pnpm run version-packages` (`pnpm version -r`), which consumes the pending changesets, bumps
-   package versions, writes
-   each package's `CHANGELOG.md` and records consumption in `.changeset/ledger.yaml`. The action commits through
+1. Merge feature PRs with changesets (see [Changesets](#changesets)).
+2. Each such merge runs the Release workflow. With pending records, `changesets/action` runs `pnpm run
+   version-packages`: `changeset version` consumes the changesets, bumps the packages, writes their changelogs
+   (with PR links and author thanks) and deletes the consumed records. The action then commits the result through
    the GitHub API (signed) and opens or updates the draft PR `chore(release): version packages` from
-   `changeset-release/main`. The PR body lists every released package with its new changelog section.
-3. Start CI on the release PR by selecting **Ready for review** after reviewing the version update. Each
-   Version Packages update returns the PR to Draft (`pr-draft: always`), so repeat this step after an update.
-   Reopening or pushing to a PR that is still Draft does not execute the full CI job. GitHub can require an
-   authorized maintainer to select **Approve workflows to run** for PR events created with `github.token`;
-   see [GitHub's trigger behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+   `changeset-release/main`; the PR body lists each package's new `CHANGELOG.md` section. Every later push with
+   changesets regenerates the PR from the new `main`. **Actions → Release → Run workflow** on `main` rebuilds it
+   on demand, for example after the PR was closed by hand. The bump comes only from the changesets: to release a
+   different bump, merge a changeset with that bump.
+3. Every version update leaves the version PR in Draft (`pr-draft: always`). Review the version and changelog
+   diff, then select **Ready for review** to start CI. Each update returns the PR to Draft, so repeat this step
+   after an update. Reopening or pushing to a PR that is still Draft does not execute the full CI job. GitHub can
+   require an authorized maintainer to select **Approve workflows to run** for PR events created with
+   `github.token`; see [GitHub's trigger behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 4. Review the version and changelog diff, confirm the `check` job actually ran and passed for the current head
    and merge result alongside the Review checks, and squash-merge. A skipped Draft job is not test evidence.
-5. Check the release identity locally on the merged release commit:
-
-   ```bash
-   git switch main && git pull
-   pnpm run release:check -- vX.Y.Z --repository OWNER/REPO
-   ```
-
-   The check requires the tag version on every published package, `publishConfig.access: "public"`, a `files`
-   list, a matching `repository.url`, and no pending changesets.
-6. Create a non-prerelease GitHub Release with tag `vX.Y.Z` targeting the release commit (not a later `main`):
-
-   ```bash
-   gh release create vX.Y.Z --target <release-commit-sha> --generate-notes
-   ```
-
-   `publish-npm.yml` checks out the tag, verifies the tag equals the package versions and the commit is on
-   `main` (`release:check --verify-git`), runs `pnpm run check`, then runs
-   `pnpm publish -r --access public --no-git-checks`. pnpm publishes natively, sends the workflow's OIDC token and
-   attaches provenance itself, and skips packages whose version already exists on npm. Prereleases do not publish.
-7. Verify every package at the new version, for example `npm view @scope/example@X.Y.Z` and a clean
-   `npm install` in a scratch project. Registry reads can lag the publish by a minute; retry the read, not the
-   publish. The npm package page shows a provenance badge linking to the workflow run.
-
-`pnpm run publish:dry-run` runs the same `pnpm publish -r` command with `--dry-run --json`: it does everything a
-publish would do except uploading, and prints, per package a publish would upload, the version and the file list.
-Run it after `pnpm run check` so `dist` exists.
+   Merging the version PR is the release decision.
+5. The merge push runs the Release workflow on the merge commit, where no record is pending: select-mode chooses
+   `publish`, the gates run, and `changeset publish` publishes each unpublished public version in
+   dependency order through Trusted Publishing. The action pushes one tag per published package
+   (`<name>@<version>`) and creates one GitHub Release per package with its changelog section.
+6. Verify every package at the new version, for example `npm view @scope/example@X.Y.Z`, `git ls-remote --tags
+   origin`, the GitHub Release, and a clean `npm install` in a scratch project. Registry reads can lag the publish
+   by a minute; retry the read, not the publish. The npm package page shows a provenance badge linking to the
+   workflow run.
 
 ## Bot Pull Requests
 
-- **Release PR**: see step 3 above. Its title already passes `gh repo-checks pr-title`; bot PRs skip the description check.
+- **Version PR**: see step 3 above. Its title already passes `gh repo-checks pr-title`; bot PRs skip the description check.
 - **Dependabot npm PRs**: one weekly PR carries every minor and patch npm update, and a second one every major.
   Dependabot officially supports pnpm 7–10; on pnpm 12 its support is limited (dependabot-core#16397), so a PR may
   edit `package.json` files or the catalog in `pnpm-workspace.yaml` without regenerating the root
@@ -136,25 +176,48 @@ Run it after `pnpm run check` so `dist` exists.
   `vite-plus` bump and the matching `vite` alias
   (`npm:@voidzero-dev/vite-plus-core`) land in separate PRs; add the alias bump to the first branch before
   merging so the two stay in lockstep. Dependabot moves a peer together with the matching devDependency; moving an
-  exact peer is a `minor` change, since hosts pinning the old version then fail to install, so do not run Version
-  Packages with only `patch` changesets for a release that carries one. Add a `patch` changeset for published
+  exact peer is a `minor` change, since hosts pinning the old version then fail to install, so do not release with
+  only `patch` changesets for a release that carries one. Add a `patch` changeset for published
   packages whose runtime dependencies or peers changed.
 - **Dependabot GitHub Actions PRs** move an action to its next major version tag (for example `actions/checkout@v7`
   to `@v8`); minor and patch releases need no PR because workflows reference the major tag. Merge them for this
-  repository's own workflows (`ci.yml`, `version-packages.yml`, `publish-npm.yml`). Close PRs that touch `review.yml` or another file
+  repository's own workflows (`ci.yml`, `publish-npm.yml`). Close PRs that touch `review.yml` or another file
   synced from [PerfectPan/project-template](https://github.com/PerfectPan/project-template), with a comment that the
   bump comes from upstream, and sync the file once upstream has it. Dependabot cannot ignore an action per file, so
   these PRs keep appearing.
 
 ## Failure Recovery
 
-- **Validation fails before publishing** (`release:check`, `pnpm run check`): nothing was published. Fix the cause
-  in a new PR, then delete the GitHub Release and its tag and create them again on the fixed commit, or cut the
-  next version. This is the only case where a tag may be recreated.
-- **Authentication fails for a package**: configure its trusted publisher, then re-run the failed workflow run.
-  pnpm skips packages already published at that version, so a re-run only publishes what is missing.
-- **Partial publish**: multi-package publishing is not atomic. Re-run the workflow; never hand-publish a different
-  artifact under the same version.
+The action publishes only when no record is pending; with records pending it prepares the version PR instead, even
+if an earlier version is still unpublished. Recovery therefore re-runs the run of the release commit itself whenever
+it can.
+
+- **Version step failed** (`changeset version`, changelog lookup): nothing changed on `main` or the release branch.
+  Re-run the latest run for a transient failure; otherwise fix the cause in a reviewed PR, whose merge regenerates
+  the version PR. A missing `GITHUB_TOKEN` fails this step.
+- **Gates failed before publication**: nothing is tagged or published. Re-run for a transient failure. Otherwise fix
+  the cause in a reviewed PR: a fix without records publishes the same version from its merge push; a fix with
+  records goes into the next version PR and that unpublished version is skipped. GitHub allows re-running a run for
+  30 days; after that, only **Run workflow** on `main` remains, and only while no record is pending.
+- **The version PR's merge run was cancelled or failed**: re-run that run. It keeps the merge commit, where no
+  record is pending, so it publishes. If a later push with records ran instead, it prepared the next version PR and
+  the merged version stays unpublished until this re-run. Avoid merging PRs with records while the merge run is
+  still waiting.
+- **Publication stopped part-way**: re-run the failed run; `changeset publish` skips versions already on npm and
+  tags the rest on the run's commit. **Run workflow** on `main` does the same only while no record is pending, and
+  it tags the current `main` commit instead of the release commit. Never bump the version to retry, and never
+  unpublish.
+- **Published but the tag or Release is missing**: the version is already on npm, so re-runs do not
+  add them. Create them by hand on the release commit:
+  `gh release create '<name>@X.Y.Z' --target <release commit>` (the tag format from step 5) with the package's
+  changelog section as notes.
+- **Version PR closed by hand or out of date**: **Run workflow** on `main` rebuilds it from the pending records.
+- **Trusted Publishing rejected one package**: fix that package's trusted publisher on npmjs.com (owner,
+  repository, workflow file name, environment) and re-run. One package's authorization does not cover the others.
+  A package name that never existed on npm needs the placeholder first publish (see
+  [First Releases](#first-releases)).
+- **A record is never consumed**: it names a private or ignored package. Remove it or move its note to a released
+  package; `check-release-plan.mjs` names it.
 - **Bad published contents**: npm versions are immutable. Deprecate the version and release a fix:
 
   ```bash
