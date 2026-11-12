@@ -2,12 +2,12 @@
   "name": "repo-scripts",
   "version": "0.0.0",
   "private": true,
-  "description": "Repository automation for this monorepo: release identity checks.",
+  "description": "Repository automation for this monorepo.",
   "type": "module",
   "scripts": {
     "lint": "vp lint 2>&1",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vp test 2>&1",
+    "test": "vp test --passWithNoTests 2>&1",
     "format": "vp fmt .",
     "format:check": "vp fmt --check ."
   },
