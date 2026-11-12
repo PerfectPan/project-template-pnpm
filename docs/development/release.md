@@ -79,8 +79,10 @@ a `fixed` group (lockstep releases at one shared version) and independent versio
 Publishing a package name that has never existed on npm fails at the trusted-publishing exchange: OIDC cannot
 create package names. `check-first-publish.mjs` stops before creating a version PR for a new package name.
 Finish the first publish (One-Time Setup below), configure its trusted publisher and re-run the failed run.
-The placeholder `0.0.0` never collides with real releases, which are higher: the kept `minor` "Initial release." changeset bumps
-`0.0.0 → 0.1.0` in the first version PR.
+The placeholder `0.0.0` never collides with real releases, which are higher: the first `minor` change record bumps
+`0.0.0 → 0.1.0` in the first version PR. The template's example package is `"private": true` and ships without a
+change record, so the template repository itself never enters this flow; a repository created from the template
+removes that flag (see One-Time Setup) and writes its own first record.
 
 ## One-Time Setup
 
@@ -91,7 +93,11 @@ The placeholder `0.0.0` never collides with real releases, which are higher: the
 2. Every published `package.json` has `repository.url` pointing at this GitHub repository (`git+https://github.com/OWNER/REPO.git`)
    and `publishConfig.access: "public"`, and lists published files in `files`. npm rejects provenance when the
    repository does not match, and a scoped package without public access cannot publish.
-3. Let GitHub Actions create pull requests: **Settings → Actions → General → Workflow permissions → Allow GitHub
+3. The template's example package carries `"private": true` and no `publishConfig`, which keeps the template's own
+   Release workflow in no-op mode. Remove `"private": true` from each package meant to publish and add the
+   `publishConfig` from the previous step; private packages stay skipped by `check-first-publish.mjs` and
+   `changeset publish`.
+4. Let GitHub Actions create pull requests: **Settings → Actions → General → Workflow permissions → Allow GitHub
    Actions to create and approve pull requests**. The Release workflow fails without it, on the first push to `main`
    that leaves changesets pending.
 
