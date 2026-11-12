@@ -25,8 +25,11 @@ template's contribution workflow (Spec + Plan), review checks, Git hooks and doc
    `gh repo create OWNER/REPO --public --template PerfectPan/project-template-pnpm --clone`).
 2. **Rename the placeholders.**
    - Package scope and name: `@scope/example` in `packages/example/package.json` (name, `repository.url` and the
-     directory), its README, and the `.changeset/initial-release.md` entry. Rename or replace `packages/example`
-     itself as needed.
+     directory) and its README. Rename or replace `packages/example` itself as needed. The example package ships
+     `"private": true` with no `publishConfig`, so the template's own Release workflow has nothing to publish:
+     once the renamed package is ready to release, remove `"private": true`, add
+     `"publishConfig": { "access": "public" }` and record its first change with `pnpm changeset` (see
+     [docs/development/release.md](docs/development/release.md)).
    - Repository URL: `PerfectPan/project-template-pnpm` in every published `package.json` `repository.url`. npm
      provenance requires it to match the publishing repository.
    - Root `package.json` `name` and this README. Pick the license by project type: libraries and tools keep
