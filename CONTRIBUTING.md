@@ -2,13 +2,16 @@
 
 ## Development Setup
 
-Requirements: the exact Node.js version in `.node-version` (26.13.1) and Git. The root `package.json`
-declares the range in `engines.node` and enforces it through `devEngines.runtime` (`onFail: "error"`): with a Node
-outside `26.13.1`, `pnpm install` fails with `ERR_PNPM_BAD_RUNTIME_VERSION`. pnpm is pinned in the root
-`package.json` `packageManager` field. Install that exact version (`npm install --global pnpm@12.8.1`);
-Node 26 does not bundle Corepack. CI installs pnpm and Node through `pnpm/setup`.
+Requirements: Node.js `^26.13.1` (`>=26.13.1 <27`) and Git. `.node-version` selects major 26 for
+version managers; install its latest release. The private root `engines.node` and `devEngines.runtime`
+(`onFail: "error"`) enforce the security floor: unsupported runtimes fail `pnpm install` with
+`ERR_PNPM_BAD_RUNTIME_VERSION`. pnpm is pinned in `packageManager`; install that exact version
+(`npm install --global pnpm@12.8.1`) because Node 26 does not bundle Corepack. CI uses `pnpm/setup`
+with `runtime: node` to resolve the latest release allowed by `devEngines.runtime`.
 
-CI and local development use the exact Node.js security release in `.node-version`. Update the private root runtime gates with that pin; published package minimums and `@types/node` stay on their supported consumer baseline unless the source requires a separate compatibility change. Workflows reference actions by their latest major tag.
+Later Node 26 patches and minors are permitted; Node 27 requires a separate upgrade. Published package
+minimums and `@types/node` stay on their supported consumer baseline unless the source requires a separate
+compatibility change. Workflows reference actions by their latest major tag.
 
 ```bash
 # install local Git hooks
