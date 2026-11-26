@@ -5,7 +5,7 @@ packages to npm.
 
 It layers a pnpm workspace, shared lint and format rules, CI, and an npm release flow on top of the
 stack-agnostic [PerfectPan/project-template](https://github.com/PerfectPan/project-template), and keeps that
-template's contribution workflow (Spec + Plan), review checks, Git hooks and documentation standards.
+template's contribution workflow (Change Design Gate and Plans), review checks, Git hooks and documentation standards.
 
 ## Stack
 
@@ -109,7 +109,7 @@ MIT. See [LICENSE](LICENSE). Projects created from this template choose their ow
 ## Template Maintenance
 
 Generic files come from [PerfectPan/project-template](https://github.com/PerfectPan/project-template): the policy
-sections of `AGENTS.md` and `CONTRIBUTING.md`, `SECURITY.md`, `docs/README.md`, `docs/specs/`,
+sections of `AGENTS.md` and `CONTRIBUTING.md`, `SECURITY.md`, `docs/README.md`,
 `docs/plans/`, the PR/MR and issue templates, `.githooks/pre-commit`, `.github/workflows/review.yml`, and the shell
 scripts under `scripts/`. Sync those from upstream instead of editing them here, then keep the pnpm-specific
 additions:
